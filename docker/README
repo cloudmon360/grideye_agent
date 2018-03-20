@@ -1,9 +1,12 @@
 Build a grideye_agent docker image.
-Note that this script is hadcoded to a specific grideye controller and user.
 
-sudo docker build --no-cache=true -t olofhagsand/grideye_agent:v1.3 .
+Example usage:
 
-sudo docker run -i -t -P olofhagsand/grideye_agent:v1.3
-sudo docker run -i -t -p 7878:7878/udp olofhagsand/grideye_agent:v1.3
-sudo docker run -d -P olofhagsand/grideye_agent:v1.3
-sudo docker push olofhagsand/grideye_agent
+First, build the Docker image using the Dockerfile in this direcotyr:
+ $ docker build .
+
+If everything built without errors, start the newly built image with:
+ $ docker run -it -e GRIDEYE_URL=<URL> -e <UUID> -e GRIDEYE_NAME=<name> <image>
+
+The grideye-agent will automatically be started when the Docker image
+runs and UDP port 7878 will be exposed.
