@@ -1,4 +1,4 @@
-FROM debian:latest
+FROM debian
 
 MAINTAINER Olof Hagsand <olof@hagsand.se>
 
@@ -20,32 +20,33 @@ RUN mkdir /grideye
 WORKDIR /grideye
 
 # Clone all dependencies and grideye-agent
-git clone https://github.com/olofhagsand/cligen.git
-git clone https://github.com/clicon/clixon.git
-git clone https://github.com/cloudmon360/grideye_agent.git
-cd ./cligen
-./configure
-make
-make install
+RUN git clone https://github.com/olofhagsand/cligen.git
+RUN git clone https://github.com/clicon/clixon.git
+RUN git clone https://github.com/cloudmon360/grideye_agent.git
 
-cd ../clixon
-./configure --without-restconf --without-keyvalue
-make
-make install
-make install-include
+# Build cligen
+WORKDIR /grideye/cligen
+RUN ./configure
+RUN make
+RUN make install
 
-cd ../grideye_agent
-./configure
-make
-make install
+# Build clixon
+WORKDIR /grideye/clixon
+RUN ./configure --without-restconf --without-keyvalue
+RUN make
+RUN make install
+RUN make install-include
 
-cd plugins/
-make install
+# Build grideye-agent
+WORKDIR /grideye/grideye_agent
+RUN ./configure
+RUN make
+RUN make install
+
+WORKDIR /grideye/grideye_agent/plugins/
+RUN make install
 
 RUN ldconfig
-
-# Create a file for disk IO tests
-RUN /bin/dd if=/dev/zero of=/var/tmp/GRIDEYE_LARGEFILE bs=1M count=1K
 
 # Run grideye-agent
 CMD grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -p udp :7878 
