@@ -48,6 +48,9 @@ RUN make install
 
 RUN ldconfig
 
+# Create a file for disk IO tests
+RUN /bin/dd if=/dev/zero of=/var/tmp/GRIDEYE_LARGEFILE bs=1M count=1K
+
 # Run grideye-agent
 CMD grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -p udp :7878 
 
