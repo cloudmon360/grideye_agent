@@ -30,7 +30,7 @@ libdir		= @libdir@
 includedir	= @includedir@
 datarootdir	= @datarootdir@
 # You may consider changing this
-image           = olofhagsand/grideye_agent
+image           = cloudmon360/grideye_agent
 CLIGEN_VERSION  = @CLIGEN_VERSION@
 CLIXON_VERSION  = @CLIXON_VERSION@
 

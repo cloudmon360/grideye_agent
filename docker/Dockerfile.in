@@ -1,16 +1,57 @@
-FROM ubuntu:14.04
-# 12.04
-MAINTAINER Olof Hagsand <olof@hagsand.se>
-ENV DEBIAN_FRONTEND noninteractive
-RUN apt-get update && apt-get install -y \
-    curl
-COPY libcligen.so.@CLIGEN_VERSION@ /usr/lib/
-COPY libclixon.so.@CLIXON_VERSION@ /usr/lib/
-RUN ldconfig
-COPY ./grideye_agent /usr/local/bin/
-CMD ["grideye_agent", "-R", "IOREADFILE", "-c", "1M", "-u", "http://grideye.nordu.net", "-I", "ba43a60e-eeb2-48f8-803d-5a3477feb3b0", "-N", "docker-grideye", "-p", "udp", ":7878"]
-EXPOSE 7878 7878/udp
+FROM debian
 
+MAINTAINER Olof Hagsand <olof@hagsand.se>
+
+ENV DEBIAN_FRONTEND noninteractive
+
+# Packages needed for building
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    make \
+    gcc \
+    automake \
+    flex \
+    bison \
+    libcurl4-openssl-dev
+
+# Create a directory to hold source-code, dependencies etc
+RUN mkdir /grideye
+WORKDIR /grideye
+
+# Clone all dependencies and grideye-agent
+RUN git clone https://github.com/olofhagsand/cligen.git
+RUN git clone https://github.com/clicon/clixon.git
+RUN git clone https://github.com/cloudmon360/grideye_agent.git
+
+# Build cligen
+WORKDIR /grideye/cligen
+RUN ./configure
+RUN make
+RUN make install
+
+# Build clixon
+WORKDIR /grideye/clixon
+RUN ./configure --without-restconf --without-keyvalue
+RUN make
+RUN make install
+RUN make install-include
+
+# Build grideye-agent
+WORKDIR /grideye/grideye_agent
+RUN ./configure
+RUN make
+RUN make install
+
+WORKDIR /grideye/grideye_agent/plugins/
+RUN make install
+
+RUN ldconfig
+
+# Run grideye-agent
+CMD grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -p udp :7878 
+
+EXPOSE 7878 7878/udp
 
 
 
