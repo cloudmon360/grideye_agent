@@ -28,7 +28,7 @@ where
 - 'id' is the UUID of the user as gievn in the controller.
 - 'name' is the name of the agent as it will appear in grideye plots.
 
-As an alternative grideye_agent can be run as a docker container. Simply pull the grideye_agnet from DockerHub and pass the needed URL, name and UUID as variables.
+As an alternative grideye_agent can be run as a docker container. Simply pull the grideye_agent from DockerHub and pass the needed URL, name and UUID as variables.
 
 For example:
 
