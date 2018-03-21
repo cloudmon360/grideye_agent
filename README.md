@@ -9,10 +9,7 @@ Cloud monitoring agent.
   * [Licenses](#4-licenses)
   * [Contact](#5-contact)
 
-Grideye_agent is part of grideye cloud monitoring software. Grideye consists of a controller, a dashboard, and agents. This is the agent part.  
-
-Some documentation about grideye architecture can be found at
-     http://grideye.sunet.se/arch
+Grideye_agent is part of the Grideye cloud monitoring software. Grideye consists of a controller, a dashboard, and agents. This is the agent part.  
 
 The grideye agent can be run in a process, in a VM or in a
 container. It communicates with a grideye controller. 
@@ -31,7 +28,9 @@ where
 - 'id' is the UUID of the user as gievn in the controller.
 - 'name' is the name of the agent as it will appear in grideye plots.
 
-As an alternative grideye_agent can be run as a docker container.
+As an alternative grideye_agent can be run as a docker container. Simply pull the grideye_agnet from DockerHub and pass the needed URL, name and UUID as variables.
+
+For example: docker run -it -e GRIDEYE_URL=<URL> -e GRIDEYE_UUID=<UUID> -e GRIDEYE_NAME=<name> cloudmon360/grideye_agent
 
 ## 2. Installation
 
