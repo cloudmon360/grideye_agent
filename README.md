@@ -30,7 +30,9 @@ where
 
 As an alternative grideye_agent can be run as a docker container. Simply pull the grideye_agnet from DockerHub and pass the needed URL, name and UUID as variables.
 
-For example: docker run -it -e GRIDEYE_URL=<URL> -e GRIDEYE_UUID=<UUID> -e GRIDEYE_NAME=<name> cloudmon360/grideye_agent
+For example:
+
+    docker run -it -e GRIDEYE_URL=<URL> -e GRIDEYE_UUID=<UUID> -e GRIDEYE_NAME=<name> cloudmon360/grideye_agent
 
 ## 2. Installation
 
