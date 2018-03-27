@@ -19,7 +19,9 @@
 
 #include "grideye_plugin_v2.h"
 
-#define _PROGRAM "/usr/lib/nagios/plugins/check_http"
+#define _PROGRAM "/usr/bin/curl"
+#define _CURLARGS "%{http_code} %{size_download} %{time_total}"
+
 
 /* Forward */
 int http_test(char *instr, char **outstr);
@@ -52,7 +54,6 @@ fork_exec_read(char  *buf,
 	       int    buflen,
 	       ...
 	       )
-
 {
     int     retval = -1;
     int     stdin_pipe[2];
@@ -151,20 +152,21 @@ http_test(char      *instr,
     int    retval = -1;
     char   buf[1024] = {0,};
     int    buflen = sizeof(buf);
-    char   code0[64], code1[64];
+    char   code0[64];
     int    size;
     double time;
     char  *str = NULL;
     size_t slen;
     char   *host = instr;
-
-    if (fork_exec_read(buf, buflen, _PROGRAM, "--ssl", "-H", host, NULL) < 0){
-	if (strlen(buf))
-	    fprintf(stderr, "%s\n", buf);
-	goto done;
+    
+    if (fork_exec_read(buf, buflen, _PROGRAM, "-s", "-o", "/dev/null", "-w", _CURLARGS, host, NULL) < 0){
+        if (strlen(buf))
+            fprintf(stderr, "%s\n", buf);
+        goto done;
     }
-    sscanf(buf, "%*s %*s %*s %s %s %*s %d %*s %*s %lf\n",
-	   code0, code1, &size, &time);
+    
+    sscanf(buf, "%s %s %lf\n",  code0, &size, &time);
+    
     if ((slen = snprintf(NULL, 0, 
 			 "<hstatus>\"%s\"</hstatus>"
 			 "<htime>%d</htime>"
@@ -195,10 +197,10 @@ void *
 grideye_plugin_init_v2(int version)
 {
     struct stat st;
-
+    
     if (version != GRIDEYE_PLUGIN_VERSION)
 	return NULL;
-    if (stat(_PROGRAM, &st) < 0){ /* Nagios check program exists? */
+    if (stat(_PROGRAM, &st) < 0) {
 	fprintf(stderr, "stat(%s): %s\n", _PROGRAM, strerror(errno));
 	return NULL;
     }
@@ -211,7 +213,7 @@ int main(int   argc,
 	 char *argv[]) 
 {
     char   *str = NULL;
-
+    
     if (argc != 2){
 	fprintf(stderr, "usage %s <host>\n", argv[0]);
 	return -1;
