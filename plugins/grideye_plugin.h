@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015-2016 Olof Hagsand
+  Copyright (C) 2015-2017 Olof Hagsand
 
   This file is part of GRIDEYE.
 
@@ -31,13 +31,13 @@
 
 
 /* Version of grideye plugin. */
-#define GRIDEYE_PLUGIN_VERSION 1
+#define GRIDEYE_PLUGIN_VERSION 2
 
 /* Version of grideye plugin. */
 #define GRIDEYE_PLUGIN_MAGIC 0x3f687f03
 
 /* Name of plugin init function (must be called this) */
-#define PLUGIN_INIT_FN_V1 "grideye_plugin_init_v1"
+#define PLUGIN_INIT_FN "grideye_plugin_init"
 
 /* Type of plugin init function */
 typedef void * (grideye_plugin_init_t)(int version);
@@ -45,24 +45,33 @@ typedef void * (grideye_plugin_init_t)(int version);
 /* Type of plugin exit function */
 typedef int (grideye_plugin_exit_t)(void);
 
-/* Type of plugin file function */
-typedef int (grideye_plugin_file_t)(const char *writefile, 
-				    const char *largefile,
-				    const char *device);
+/*
+ * The options defined in v2 are:
+ * largefile, writefile, device
+ */
+/* Type of plugin generic setopt function */
+typedef int (grideye_plugin_setopt_t)(const char *optname, char *value);
 
 /* Type of plugin test function */
-typedef int (grideye_plugin_test_t)(int inparam, char **outstr);
+typedef int (grideye_plugin_test_t)(char *instr, char **outstr);
 
-/* grideye agent plugin init struct for the api */
-struct grideye_plugin_api_v1{
+/* grideye agent plugin init struct for the api 
+ * Note: Implicit init function, see PLUGIN_INIT_FN 
+ */
+struct grideye_plugin_api{
+    /* Version. Should be 2 */
     int                    gp_version;
     int                    gp_magic;
-    grideye_plugin_exit_t *gp_exit_fn;
+    /* Plugin name */
+    char                  *gp_name;    
+    /* test input and output format: xml, csv, json */
+    char                  *gp_input_format;
+    char                  *gp_output_format; 
+    /* Generic setopt function */
+    grideye_plugin_setopt_t *gp_setopt_fn;
+    /* Test function with xml|json input and output */
     grideye_plugin_test_t *gp_test_fn;
-    grideye_plugin_file_t *gp_file_fn;
-    char                  *gp_input_param;
-    char                  *gp_output_format; /* only xml allowed */
+    grideye_plugin_exit_t *gp_exit_fn;
 };
 
-
-
+int fork_exec_read(char *buf, int buflen, ...);
