@@ -15,7 +15,7 @@
 #include <sys/time.h>
 #include <inttypes.h>
 
-#include "grideye_plugin_v2.h"
+#include "grideye_plugin.h"
 
 /* Forward */
 int dhrystones_test(char *instr, char **outstr);
@@ -23,7 +23,7 @@ int dhrystones_test(char *instr, char **outstr);
 /*
  * This is the API declaration
  */
-static const struct grideye_plugin_api_v2 api = {
+static const struct grideye_plugin_api api = {
     2,               /* version */
     GRIDEYE_PLUGIN_MAGIC,
     "dhrystones",    /* name */
@@ -69,7 +69,7 @@ dhrystones_test(char      *instr,
 
 /* Grideye agent plugin init function must be called grideye_plugin_init */
 void *
-grideye_plugin_init_v2(int version)
+grideye_plugin_init(int version)
 {
     if (version != GRIDEYE_PLUGIN_VERSION)
 	return NULL;
@@ -87,7 +87,7 @@ main(int   argc,
 	fprintf(stderr, "usage %s <dhrystones>\n", argv[0]);
 	return -1;
     }
-    if (grideye_plugin_init_v2(2) == NULL)
+    if (grideye_plugin_init(2) == NULL)
 	return -1;
     if (dhrystones_test(argv[1], &str) < 0)
 	return -1;
