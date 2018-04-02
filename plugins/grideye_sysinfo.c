@@ -16,7 +16,7 @@
 #include <errno.h>
 #include <sys/sysinfo.h>
 
-#include "grideye_plugin_v2.h"
+#include "grideye_plugin.h"
 
 #define LINUX_SYSINFO_LOADS_SCALE (65536)
 #define PERCENT (100)
@@ -28,7 +28,7 @@ int  sysinfo_test(char *instr, char **outstr);
 /*
  * This is the API declaration
  */
-static const struct grideye_plugin_api_v2 api = {
+static const struct grideye_plugin_api api = {
     2,
     GRIDEYE_PLUGIN_MAGIC,
     "sysinfo",
@@ -125,7 +125,7 @@ sysinfo_test(char      *instr,
 
 /* Grideye agent plugin init function must be called grideye_plugin_init */
 void *
-grideye_plugin_init_v2(int version)
+grideye_plugin_init(int version)
 {
     if (version != GRIDEYE_PLUGIN_VERSION)
 	return NULL;
@@ -139,7 +139,7 @@ int main()
 {
     char   *str = NULL;
 
-    if (grideye_plugin_init_v2(2) == NULL)
+    if (grideye_plugin_init(2) == NULL)
 	return -1;
     if (sysinfo_test(0, &str) < 0)
 	return -1;

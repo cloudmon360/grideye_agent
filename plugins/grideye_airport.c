@@ -37,7 +37,7 @@ lastAssocStatus: 0
 #include <sys/stat.h>
 #include <sys/wait.h>
 
-#include "grideye_plugin_v2.h"
+#include "grideye_plugin.h"
 
 static const char *_airport_prog = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport";
 static char *_device = NULL;
@@ -49,7 +49,7 @@ int airport_test(char *instr, char **outstr);
 /*
  * This is the API declaration
  */
-static const struct grideye_plugin_api_v2 api = {
+static const struct grideye_plugin_api api = {
     2,
     GRIDEYE_PLUGIN_MAGIC,
     "wlan",
@@ -68,105 +68,6 @@ airport_exit(void)
 	_device = NULL;
     }
     return 0;
-}
-
-/*! Fork and exec a process and read output from stdout
- * @param[out]  buf    Buffer to store output from process
- * @param[in]   buflen Length of buffer
- * @param[in]   ...    Variable argument list
- * @retval -1          Error. Error string in buf
- * @retval  n          Number of bytes read
- * @note Assume that the output (if any) is terminated by a LF/CR, or some other
- * non-printable character which can be replaced with \0 and yield a string
- */
-static int 
-fork_exec_read(char  *buf,
-	       int    buflen,
-	       ...
-	       )
-
-{
-    int     retval = -1;
-    int     stdin_pipe[2];
-    int     stdout_pipe[2];
-    int     pid;
-    int     status;
-    int     len;
-    va_list ap;
-    char   *s;
-    int     argc;
-    char  **argv;
-    int     i;
-
-    /* Translate from va_list to argv */
-    va_start(ap, buflen);
-    argc = 0;
-    while ((s = va_arg(ap, char *)) != NULL)
-	argc++;
-    va_end(ap);
-    va_start(ap, buflen);
-    if ((argv = calloc(argc+1, sizeof(char*))) == NULL){
-	perror("calloc");
-	goto done;
-    }
-    for (i=0; i<argc; i++)
-	argv[i] = va_arg(ap, char *);
-    argv[i] = NULL;
-    va_end(ap);
-    if (pipe(stdin_pipe) < 0){
-	perror("pipe");
-	goto done;
-    }
-    if (pipe(stdout_pipe) < 0){
-	perror("pipe");
-	goto done;
-    }
-    if ((pid = fork()) != 0){ /* parent */
-	close(stdin_pipe[0]); 
-	close(stdout_pipe[1]);
-    }
-    else { /* child */
-	close(0);
-	if (dup(stdin_pipe[0]) < 0){
-	    perror("dup");
-	    return  -1;
-	}
-	close(stdin_pipe[0]); 
-	close(stdin_pipe[1]); 
-	close(1);
-	if (dup(stdout_pipe[1]) < 0){
-	    perror("dup");
-	    return  -1;
-	}
-	close(stdout_pipe[1]);  
-	close(stdout_pipe[0]);
-	if (execv(argv[0], argv) < 0){
-	    fprintf(stderr, "execv %s: %s\n",  argv[0], strerror(errno));
-	    exit(1);
-	}
-	exit(0); /* Not reached */
-    }
-    if (pid < 0){
-	perror("fork");
-	goto done;
-    }
-    close(stdin_pipe[1]);
-    if ((len = read(stdout_pipe[0], buf, buflen)) < 0){
-	perror("read");
-	goto done;
-    }
-    if (len>0)
-	buf[len-1] = '\0';
-    close(stdout_pipe[0]);
-    if (waitpid(pid, &status, 0) < 0){
-	perror("waitpid");
-	goto done;
-    }
-    if (status != 0)
-	goto done;
-    retval = len;
- done:
-    return retval;
 }
 
 /*! Find a keyword in buf and write value after colon into string
@@ -310,7 +211,7 @@ airport_test(char  *instr,
 
 /* Grideye agent plugin init function must be called grideye_plugin_init */
 void *
-grideye_plugin_init_v2(int version)
+grideye_plugin_init(int version)
 {
     struct stat st;
 
@@ -326,7 +227,7 @@ int main()
 {
     char   *str = NULL;
 
-    if (grideye_plugin_init_v2(2) == NULL)
+    if (grideye_plugin_init(2) == NULL)
 	return -1;
     if (airport_test(0, &str) < 0)
 	return -1;

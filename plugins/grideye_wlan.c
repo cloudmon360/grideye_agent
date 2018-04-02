@@ -20,7 +20,7 @@
 #include <math.h>
 #include <sys/stat.h>
 
-#include "grideye_plugin_v2.h"
+#include "grideye_plugin.h"
 
 static const char *_filename = "/proc/net/wireless";
 static char *_device = NULL;
@@ -33,7 +33,7 @@ int wlan_setopt(const char *optname, char *value);
 /*
  * This is the API declaration
  */
-static const struct grideye_plugin_api_v2 api = {
+static const struct grideye_plugin_api api = {
     2,
     GRIDEYE_PLUGIN_MAGIC,
     "wlan",
@@ -146,7 +146,7 @@ wlan_setopt(const char *optname,
 
 /* Grideye agent plugin init function must be called grideye_plugin_init */
 void *
-grideye_plugin_init_v2(int version)
+grideye_plugin_init(int version)
 {
     struct stat st;
 
@@ -162,7 +162,7 @@ int main()
 {
     char   *str = NULL;
 
-    if (grideye_plugin_init_v2(2) == NULL)
+    if (grideye_plugin_init(2) == NULL)
 	return -1;
     if (wlan_file(NULL, NULL, "wlan0") < 0)
 	return -1;
