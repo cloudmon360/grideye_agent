@@ -30,16 +30,16 @@ top_srcdir  	= @top_srcdir@
 bindir          = @bindir@
 HOST_CPU        = @host_cpu@
 HOST_VENDOR     = @host_vendor@
-#plugindir	= $(DESTDIR)$(libdir)/grideye
 plugindir	= $(DESTDIR)@GRIDEYE_PLUGIN_DIR@
 
 CC	= @CC@
-#CFLAGS  = @CFLAGS@  @DEFS@
 CFLAGS  = -O2 -Wall -rdynamic -fPIC # Dynamic linking
 CFLAGS += -D_NOMAIN # Disable unit test main in .c files
 CFLAGS += -DPLUGINDIR=$(plugindir)
 CFLAGS += @DEFS@
+
 LDFLAGS = @LDFLAGS@
+
 INCLUDES  = -I.
 INCLUDES += -I@srcdir@
 INCLUDES += @INCLUDES@
@@ -67,41 +67,40 @@ endif
 
 all:	$(PLUGINS)
 
-# Build plugin
-grideye_dhrystones.so.1: dhry_1.c dhry_2.c dhrystones.c
-	echo $(plugindir)
+# Build plugins
+grideye_dhrystones.so.1: dhry_1.c dhry_2.c grideye_dhrystones.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^
 
-grideye_diskio_write.so.1: diskio_write.c
+grideye_diskio_write.so.1: grideye_diskio_write.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ 
 
-grideye_diskio_write_rnd.so.1: diskio_write_rnd.c
+grideye_diskio_write_rnd.so.1: grideye_diskio_write_rnd.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ 
 
-grideye_diskio_read.so.1: diskio_read.c
+grideye_diskio_read.so.1: grideye_diskio_read.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^
 
-grideye_mem_read.so.1: mem_read.c mem_read_test.c
+grideye_mem_read.so.1: grideye_mem_read.c grideye_mem_read_test.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^
 
-grideye_wlan.so.1: grideye_wlan.c
+grideye_wlan.so.1: grideye_plugin.c grideye_wlan.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm
 
-grideye_iwget.so.1: grideye_iwget.c
+grideye_iwget.so.1: grideye_plugin.c grideye_iwget.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm
 
-grideye_airport.so.1: grideye_airport.c
+grideye_airport.so.1: grideye_plugin.c grideye_airport.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm
 
 grideye_sysinfo.so.1: grideye_sysinfo.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm
 
-grideye_http.so.1: grideye_http.c
+grideye_http.so.1: grideye_plugin.c grideye_http.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm
 
 ifeq ($(HOST_CPU),x86_64) 
 ifneq ($(HOST_VENDOR),apple)
-grideye_cycles.so.1: cycles.c cycles_test.s
+grideye_cycles.so.1: grideye_cycles.c grideye_cycles_test.s
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^
 endif
 endif
