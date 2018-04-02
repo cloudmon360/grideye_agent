@@ -73,7 +73,7 @@ A grideye plugin is a dynamically loaded plugin written in C. You
 write a file with a couple of functions, compile it, place it in a
 directory, and restart grideye_agent.
 
-A grideye plugin has a pre-defined function *grideye_plugin_init_v2()*
+A grideye plugin has a pre-defined function *grideye_plugin_init()*
 which returns a table containing API functions.
 
 The API table is as follows:
