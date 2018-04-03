@@ -682,8 +682,8 @@ echo_application(struct sender *snd,
 		clicon_log(LOG_DEBUG, "grideye_agent: %s name:%s(%s)",
 			   __FUNCTION__, p->p_name, argstr?argstr:"");
 		if ((pret = api->gp_test_fn(argstr, &str)) < 0){
-		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: %s failed: retval:%d str:%s", p->p_name, pret, str);
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed");
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
+			       p->p_name, str?str:"");
 		    continue;
 		}
 		if (str){
@@ -1680,6 +1680,7 @@ main(int   argc,
 			   p->p_name, strerror(errno));
 	    }
 	    if (api->gp_setopt_fn("largefile", diskio_largefile) < 0){
+		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin setopt(largefile):%s",
 			   diskio_largefile);
 		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no largefile)",

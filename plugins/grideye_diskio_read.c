@@ -164,16 +164,16 @@ diskio_read_setopt(const char *optname,
     /*
      * Compute file size unless given: 2xRAM size
      */
-
     if ((page_size = sysconf(_SC_PAGESIZE)) < 0)
 	goto done;
     if ((num_pages = sysconf(_SC_PHYS_PAGES)) < 0)
 	goto done;
     //    ram = page_size/1024 * (num_pages/1024);
     //    fprintf(stderr, "%s ramsize: %" PRIu64 " Mbytes\n", __FUNCTION__, ram);    
-    if ((fd = open(_filename, O_RDONLY)) < 0)
+    if ((fd = open(_filename, O_RDONLY)) < 0){
 	fprintf(stderr, "fd=%d", fd);
-    goto done;
+	goto done;
+    }
     if ((_filesize = lseek(fd, 0, SEEK_END)) < 0)
 	goto done;
     retval = 0;
