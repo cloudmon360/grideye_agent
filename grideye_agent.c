@@ -422,8 +422,9 @@ url_post(char *url,
      * verification of the server's certificate. This makes the connection
      * A LOT LESS SECURE.
      */
+#if 0
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-
+#endif
     if (debug>1)
 	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
     if (header){
@@ -1117,12 +1118,12 @@ callhome_http(char               *url,
     struct sender *snd = NULL;
     struct sockaddr_in sndaddr = {0,};
     struct plugin *p;
+    int    i;
 
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
     }
-
     if ((cb = cbuf_new()) == NULL){ /* data */
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
@@ -1136,10 +1137,11 @@ callhome_http(char               *url,
     if (info)
 	cprintf(cb, "\"info\":\"%s\",", info);
     cprintf(cb, "\"plugins\":[");
+    i = 0;
     for (p = plugins; (p->p_api!=NULL); p++){
 	if (p->p_disable)
 	    continue;
-	if (p!=plugins)
+	if (i++)
 	    cprintf(cb, ",");
 	cprintf(cb, "\"%s\"", p->p_name);
     }
