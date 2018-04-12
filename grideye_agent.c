@@ -408,7 +408,7 @@ url_post(char *url,
 	clicon_err(OE_UNIX, errno, "malloc");
 	goto done;
     }
-    
+    memset(err,0,CURL_ERROR_SIZE);
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, err);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_get_cb);
@@ -416,6 +416,14 @@ url_post(char *url,
     curl_easy_setopt(curl, CURLOPT_POST, 1);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, putdata);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(putdata));
+    /* XXX:
+     * If you want to connect to a site who isn't using a certificate that is
+     * signed by one of the certs in the CA bundle you have, you can skip the
+     * verification of the server's certificate. This makes the connection
+     * A LOT LESS SECURE.
+     */
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+
     if (debug>1)
 	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
     if (header){
@@ -426,8 +434,7 @@ url_post(char *url,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600); /* 10 min */
 
     if ((errcode = curl_easy_perform(curl)) != CURLE_OK){
-	clicon_log(LOG_DEBUG, "%s: curl_easy_perform: %s(%d)", __FUNCTION__, err, errcode);
-	retval = 0;
+	clicon_err(OE_UNIX, errcode, "curl_easy_perform: %s", err);
 	goto done;
     }
     if (remoteip &&
@@ -1142,6 +1149,8 @@ callhome_http(char               *url,
     cprintf(ub, "%s/restconf/operations/grideye:callhome", url);
     if (url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+json", NULL,
 		 &getdata, &remoteip) < 0)
+	goto done;
+    if (getdata == NULL)
 	goto done;
     /* xml parse reply: here is where we get the port */
     switch (proto){
