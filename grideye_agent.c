@@ -1596,7 +1596,7 @@ usage(char *argv0)
 	    "\t-u <url>\tCall home URL. Send if no rx traffic in -t s\n"
 	    "\t-I <id>\t\tId to use with -u\n"
 	    "\t-N <name>\tName to use in logs and callhome. default is hostname\n"
-	    "\t-p udp|tcp|http\tData protocol to use with -u\n"
+	    "\t-p udp|tcp|http\tData protocol to use with -u. Default http\n"
 	    "\t-r \t\tSynthetic reorder of pkt 30\n"
 	    "\t-L \t\tSynthetic loss of pkt 20\n"
 	    "\t-d \t\tSynthetic duplicate of pkt 40\n"
@@ -1690,7 +1690,7 @@ main(int   argc,
     plugin_dir = PLUGINDIR;
     plugins = NULL;
     foreground = 0;
-    proto = GRIDEYE_PROTO_UDP;
+    proto = GRIDEYE_PROTO_HTTP;
     strncpy(pidfile, GRIDEYE_AGENT_PIDFILE, sizeof(pidfile)-1);
 
     /* Hostname for logs and callbacks, overwritten by -N */
@@ -1982,8 +1982,8 @@ main(int   argc,
 		FD_SET(s, &fdset);
 	    break;
 	case GRIDEYE_PROTO_HTTP:
-	    tv.tv_sec = callhome_timeout/1000;
-	    tv.tv_usec = callhome_timeout%1000;
+	    tv.tv_sec = interval/1000;
+	    tv.tv_usec = interval%1000;
 	default:
 	    break;
 	}
