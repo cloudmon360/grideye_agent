@@ -1267,8 +1267,8 @@ http_data(char               *url,
     cprintf(cb, "<name>%s</name>", name);
     cprintf(cb, "<userid>%s</userid>", id);
     if (cbmetr){
-	cprintf(cb, "<sseqn>%lu</sseqn>", *sseq);
-	cprintf(cb, "<aseqn>%lu</aseqn>", aseq++);
+	cprintf(cb, "<sseqn>%" PRIu64 "</sseqn>", *sseq);
+	cprintf(cb, "<aseqn>%" PRIu64 "</aseqn>", aseq++);
 	cprintf(cb, "<t0>%ld.%06ld</t0>", t0->tv_sec, t0->tv_usec);
 	cprintf(cb, "<t1>%ld.%06ld</t1>", t1->tv_sec, t1->tv_usec);
 	gettimeofday(&t2, NULL);
