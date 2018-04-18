@@ -81,9 +81,10 @@ diskio_read_test(char     *instr,
     uint64_t t_us;
     char    *str = NULL;
     size_t   slen;
-    int      len;
+    int      len = 0;
 
-    len = atoi(instr);
+    if (instr)
+	len = atoi(instr);
     if (len == 0){
 	retval = 0;
 	goto done;

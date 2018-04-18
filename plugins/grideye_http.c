@@ -60,6 +60,10 @@ http_test(char      *instr,
     size_t slen;
     char   *host = instr;
     
+    if (host == NULL){
+	*outstr = strdup("No parameter");
+	goto done;
+    }
     if (fork_exec_read(buf, buflen, _PROGRAM, "-s", "-o", "/dev/null", "-w", _CURLARGS, host, NULL) < 0){
         if (strlen(buf))
             fprintf(stderr, "%s\n", buf);

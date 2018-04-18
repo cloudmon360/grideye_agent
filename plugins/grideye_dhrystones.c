@@ -47,9 +47,10 @@ dhrystones_test(char      *instr,
     size_t         slen;
     uint64_t       t_us;
     char          *str = NULL;
-    int            dhrystones;
+    int            dhrystones = 0;
 
-    dhrystones = atoi(instr);
+    if (instr != NULL)
+	dhrystones = atoi(instr);
     gettimeofday(&t0, NULL);
     if (dhry_main(dhrystones, 0) < 0)
 	goto done;
