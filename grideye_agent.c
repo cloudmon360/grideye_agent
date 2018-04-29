@@ -57,6 +57,9 @@
 #include <sys/sockio.h> /* Dont remove: SIOCGIFADDR will be undefined below */
 #endif
 
+/* For Python plugin support */
+#include <Python.h>
+
 #include <cligen/cligen.h>     /* cbuf */
 #include <clixon/clixon.h>     /* xml, xpath, log, err */
 
@@ -117,6 +120,8 @@ extern const char GRIDEYE_VERSION[];
 #define PLUGINDIR "/usr/local/lib/grideye"
 #endif
 
+#define GRIDEYE_PLUGIN_PYTHON 0x50595448
+
 /*
  * Local types
  */
@@ -161,6 +166,7 @@ struct timeval firstpkt, lastpkt;
 static int     quiet = 0;
 static struct plugin *plugins = NULL;
 static char    *pidfile = GRIDEYE_AGENT_PIDFILE;
+static char *plugin_dir = NULL;
 
 /*
  *! Return number of plugins in plugins vector. This is one less than vectorlen
@@ -188,12 +194,316 @@ plugin_find(char *name)
     return NULL;
 }
 
+/*
+ *! Convert value of a Python object to a char array
+ */
+static char
+*grideye_pyobj_to_char(PyObject *pyobj)
+{
+	char *cstr;
+	PyObject *tmpstr;
+
+	// Make sure we have a string object
+	if (!strcmp((char *)Py_TYPE(pyobj), "str"))
+	    goto fail;
+
+	// In Python 3 all strings are unicode
+	if ((tmpstr = PyUnicode_AsEncodedString(pyobj, "utf-8", "")) == NULL)
+	    goto fail;
+
+	if ((cstr = PyBytes_AS_STRING(tmpstr)) == NULL)
+	    goto fail;
+
+	return cstr;
+
+fail:
+	return NULL;
+}
+
+/*
+ *! Convert Python object to integer
+ */
+static unsigned long
+grideye_pyobj_to_long(PyObject *pyobj)
+{
+	unsigned long ret;
+	static unsigned long long_max = 0xFFFFFFFF;
+
+	// Make sure we have an integer
+	ret = PyLong_AsUnsignedLong(pyobj);
+
+	if (ret == -1 || ret > long_max)
+		goto fail;
+
+	return (uint32_t)ret;
+
+fail:
+	return -1;
+}
+
+/*
+ *!
+ */
+static char
+*grideye_call_testmethod(char *name,
+			 char *testfunc,
+			 char *argstr)
+{
+    PyObject *pyfunc;
+    PyObject *pyargs;
+    PyObject *pyvalue;
+    PyObject *pyretval;
+    PyObject *pyname;
+    PyObject *pymodule;
+
+    char     *outstr;
+    char     *syscmd;
+    char     *modulename;
+
+    int      modulelen = 0;
+    int      syscmdlen = 0;
+
+    if ((modulelen = snprintf(NULL, 0, "grideye_%s", name)) <= 0)
+	goto fail;
+
+    if ((syscmdlen = snprintf(NULL,
+			      0,
+			      "sys.path.append(\"%s\")",
+			      plugin_dir)) <= 0)
+	goto fail;
+    if ((modulename = calloc(modulelen + 1, sizeof(char))) == NULL) {
+	clicon_err(OE_UNIX, errno, "calloc");
+	goto fail;
+    }
+    if ((syscmd = calloc(syscmdlen + 1, sizeof(char))) == NULL) {
+	clicon_err(OE_UNIX, errno, "calloc");
+	goto fail;
+    }
+    if (snprintf(modulename, modulelen + 1, "grideye_%s", name) <= 0)
+	goto fail;
+
+    if (snprintf(syscmd, syscmdlen + 1,
+		 "sys.path.append(\"%s\")",
+		 plugin_dir) <= 0)
+	goto fail;
+
+    Py_Initialize();
+
+    PyRun_SimpleString("import sys");
+    PyRun_SimpleString(syscmd);
+
+    if (syscmd)
+	free(syscmd);
+
+    pyname = PyUnicode_DecodeFSDefault(modulename);
+    pymodule = PyImport_Import(pyname);
+
+    Py_DECREF(pyname);
+
+    if (pymodule == NULL) {
+	clicon_log(LOG_ERR, "Failed to load Python module %s", modulename);
+	goto fail;
+    }
+
+    if (modulename)
+	free(modulename);
+
+    pyfunc = PyObject_GetAttrString(pymodule, testfunc);
+    if (!pyfunc || !PyCallable_Check(pyfunc)) {
+	clicon_log(LOG_ERR, "Function %s is not callable", PLUGIN_INIT_FN);
+	goto fail;
+    }
+
+    Py_DECREF(pymodule);
+
+    pyargs = PyTuple_New(1);
+    pyvalue = PyBytes_FromString(argstr);
+
+    PyTuple_SetItem(pyargs, 0, pyvalue);
+
+    Py_DECREF(pyvalue);
+
+    if ((pyretval = PyObject_CallObject(pyfunc, pyargs)) == NULL) {
+	goto fail;
+    }
+
+    Py_DECREF(pyargs);
+    Py_DECREF(pyfunc);
+
+    if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 1) {
+	goto fail;
+    }
+
+    outstr = strdup(grideye_pyobj_to_char(PyList_GetItem(pyretval, 0)));
+
+    Py_DECREF(pyretval);
+
+    return outstr;
+
+fail:
+    return NULL;
+}
+
+/*
+ * Load a Python plugin.
+ */
+static int
+grideye_plugin_load_py(void *handle,
+		       char *name,
+		       char *filename,
+		       struct plugin *plugins[])
+{
+    struct grideye_plugin_api *api;
+    int                       len;
+    int                       retval = 0;
+    char                      *syscmd;
+    char                      *modulename;
+    int                       syscmdlen = 0;
+    int                       modulelen = 0;
+
+    // Python objects
+    PyObject                  *pyname;
+    PyObject                  *pymodule;
+    PyObject                  *pyvalue;
+    PyObject                  *pyfunc;
+    PyObject                  *pyretval;
+    PyObject                  *pyargs;
+
+    int                       gp_version;
+    int                       gp_magic;
+
+    modulename = strdup(name);
+    modulelen = strlen(modulename);
+    modulename[modulelen - 3] = '\0';
+
+    if ((syscmdlen = snprintf(NULL,
+			      0,
+			      "sys.path.append(\"%s\")",
+			      plugin_dir)) <= 0)
+	goto fail;
+
+    if ((syscmd = calloc(syscmdlen + 1, sizeof(char))) == NULL) {
+	clicon_err(OE_UNIX, errno, "calloc");
+	goto fail;
+    }
+
+    if ((snprintf(syscmd,
+		  syscmdlen + 1,
+		  "sys.path.append(\"%s\")",
+		  plugin_dir)) <= 0) {
+	goto fail;
+    }
+
+
+    Py_Initialize();
+    PyRun_SimpleString("import sys");
+    PyRun_SimpleString(syscmd);
+
+    if (syscmd)
+	free(syscmd);
+
+    pyname = PyUnicode_DecodeFSDefault(modulename);
+
+    if (modulename)
+	free(modulename);
+
+    if ((pymodule = PyImport_Import(pyname)) == NULL) {
+	clicon_log(LOG_ERR, "Failed to load Python module %s", name);
+	goto fail;
+    }
+
+    Py_DECREF(pyname);
+
+    pyfunc = PyObject_GetAttrString(pymodule, PLUGIN_INIT_FN);
+    if (!pyfunc || !PyCallable_Check(pyfunc)) {
+		clicon_log(LOG_ERR,
+			   "Function %s is not callable",
+			   PLUGIN_INIT_FN);
+		goto fail;
+    }
+
+    Py_DECREF(pymodule);
+
+    pyargs = PyTuple_New(1);
+    pyvalue = PyLong_FromLong(GRIDEYE_PLUGIN_VERSION);
+
+    PyTuple_SetItem(pyargs, 0, pyvalue);
+
+    Py_DECREF(pyvalue);
+
+    if ((pyretval = PyObject_CallObject(pyfunc, pyargs)) == NULL)
+		goto fail;
+
+    Py_DECREF(pyargs);
+
+    if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 8)
+		goto fail;
+
+    if ((gp_version = grideye_pyobj_to_long(PyList_GetItem(pyretval, 0)))
+	!= GRIDEYE_PLUGIN_VERSION) {
+	    clicon_log(LOG_NOTICE,
+		       "grideye_agent: Disabling %s, wrong version",
+		       gp_version);
+	    goto fail;
+    }
+
+    if ((api = calloc(1, sizeof(struct grideye_plugin_api))) == NULL)
+	clicon_err(OE_UNIX, errno, "calloc");
+
+    if ((gp_magic = grideye_pyobj_to_long(PyList_GetItem(pyretval, 1)))
+	!= GRIDEYE_PLUGIN_MAGIC) {
+	    clicon_log(LOG_NOTICE,
+		       "grideye_agent: Disabling %s, wrong magic",
+		       gp_magic);
+	    goto fail;
+    }
+
+    api->gp_version = gp_version;
+    api->gp_name = grideye_pyobj_to_char(PyList_GetItem(pyretval, 2));
+    api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 6));
+    api->gp_magic = (gp_magic & GRIDEYE_PLUGIN_PYTHON);
+    api->gp_output_format = grideye_pyobj_to_char(PyList_GetItem(pyretval, 4));
+
+    len = plugins_len(*plugins);
+    if ((*plugins = realloc(*plugins, (len+2)*sizeof(struct plugin))) == NULL){
+	clicon_err(OE_UNIX, errno, "grideye_agent: realloc failed");
+	goto done;
+    }
+
+    memcpy(&(*plugins)[len+1], &(*plugins)[len], sizeof(struct plugin));
+    (*plugins)[len].p_handle = handle;
+
+    if (((*plugins)[len].p_filename = strdup(name)) == NULL){
+	clicon_err(OE_UNIX, errno, "grideye_agent: strdup failed");
+	goto done;
+    }
+
+    /* Plugin name should be read for plugin itself, but use filename - ext */
+    if (((*plugins)[len].p_name = strdup(api->gp_name)) == NULL){
+	clicon_err(OE_UNIX, errno, "grideye_agent: strdup failed");
+	goto done;
+    }
+
+    (*plugins)[len].p_api = api;
+
+    Py_Finalize();
+
+    retval = 1;
+
+ done:
+    return retval;
+
+ fail:
+    retval = 1;
+    goto done;
+}
+
 /*! Load a specific plugin, call its init function and add it to plugins list
  * If init function fails (not found, wrong version, etc) print a log and dont
  * add it.
  */
 static int
-grideye_plugin_load(void          *handle,
+grideye_plugin_load_so(void          *handle,
 		    char          *name,
 		    char          *filename,
 		    struct plugin *plugins[]
@@ -277,7 +587,8 @@ plugin_load_dir(char          *dir,
     void          *handle = NULL;
     int            res;
     char          *name;
-    int            off;
+    int            off_so;
+    int            off_py;
     char          *filename;
     int            len;
 
@@ -301,8 +612,10 @@ plugin_load_dir(char          *dir,
        }
        /* match .so */
        name = dent.d_name;
-       off = strlen(name)-5;
-       if (off<=0 || strcmp(".so.1", name+off)!=0)
+       off_so = strlen(name)-5;
+       off_py = strlen(name) - 3;
+
+       if ((off_so <= 0 || strcmp(".so.1", name + off_so) != 0) && (off_py <= 0 || strcmp(".py", name + off_py) != 0))
 	   continue;
        len = strlen(dir)+1+strlen(name)+1;
        if ((filename = malloc(len)) == NULL){
@@ -311,15 +624,28 @@ plugin_load_dir(char          *dir,
        }
        snprintf(filename, len, "%s/%s", dir, name);
 
-       dlerror();    /* Clear any existing error */
-       if ((handle = dlopen(filename, RTLD_NOW)) == NULL) {
-	   clicon_err(OE_UNIX, 0, "dlopen: %s", (char*)dlerror());
-	   goto done;
+       if (strcmp(".so.1", name + off_so) == 0) {
+	   dlerror();    /* Clear any existing error */
+	   if ((handle = dlopen(filename, RTLD_NOW)) == NULL) {
+	       clicon_err(OE_UNIX, 0, "dlopen: %s", (char*)dlerror());
+	       goto done;
+	   }
+
+	   if (grideye_plugin_load_so(handle, name, filename, plugins) < 0){
+	       free(filename);
+	       goto done;
+	   }
+       } else if (strcmp(".py", name + off_py) == 0) {
+	   /* Python plugin */
+	   if (grideye_plugin_load_py(handle, name, filename, plugins) < 0) {
+	       clicon_log(LOG_NOTICE, "grideye_plugin_load_py failed");
+	       free(filename);
+	       goto done;
+	   } else {
+	       clicon_log(LOG_NOTICE, "grideye_plugin_load_py was successful");
+	   }
        }
-       if (grideye_plugin_load(handle, name, filename, plugins) < 0){
-	   free(filename);
-	   goto done;
-       }
+
        free(filename);
    }
     retval = 0;
@@ -422,7 +748,7 @@ url_post(char *url,
      * verification of the server's certificate. This makes the connection
      * A LOT LESS SECURE.
      */
-#if 0 /* Verify CA */
+#if 1 /* Verify CA */
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 #endif
     if (debug>1)
@@ -688,14 +1014,25 @@ echo_application(struct sender *snd,
 	    argstr = NULL;
 	    if ((x = xpath_first(xp, "param")) != NULL)
 		argstr = xml_body(x);
-	    if (api->gp_test_fn){
+
+	    if (api->gp_test_fn != NULL){
 		clicon_log(LOG_DEBUG, "grideye_agent: %s name:%s(%s)",
 			   __FUNCTION__, p->p_name, argstr?argstr:"");
-		if ((pret = api->gp_test_fn(argstr, &str)) < 0){
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
-			       p->p_name, str?str:"");
-		    continue;
+
+		if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
+		    if ((str = grideye_call_testmethod(api->gp_name,
+						       (char *)api->gp_test_fn,
+						       argstr)) == NULL)
+			continue;
+		    clicon_log(LOG_NOTICE, "Returned %s", str);
+		} else {
+		    if ((pret = api->gp_test_fn(argstr, &str)) < 0) {
+			clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
+				   p->p_name, str?str:"");
+			continue;
+		    }
 		}
+
 		if (str){
 		    if (strcmp(api->gp_output_format, "json")==0){
 			cxobj *xt= NULL;
@@ -769,7 +1106,9 @@ echo_application_xml(cxobj         *xt,
 	    errpkts++;
 	    goto done;
 	}
+
 	pstr = xml_body(x);
+
 	/* Find matching plugin */
 	if ((p = plugin_find(pstr)) == NULL)
 	    continue; /* silently ignore */
@@ -777,19 +1116,27 @@ echo_application_xml(cxobj         *xt,
 	    continue; /* silently ignore */
 	if ((api = p->p_api) == NULL)
 	    continue; /* silently ignore */
+
 	/* XXX only single argument */
 	argstr = NULL;
 	if ((x = xpath_first(xp, "param")) != NULL)
 	    argstr = xml_body(x);
-	if (api->gp_test_fn){
-	    clicon_log(LOG_DEBUG, "grideye_agent: %s name:%s(%s)",
-		       __FUNCTION__, p->p_name, argstr?argstr:"");
-	    if ((pret = api->gp_test_fn(argstr, &str)) < 0){
-		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
-			   p->p_name, str?str:"");
-		continue;
+
+	if (api->gp_test_fn != NULL) {
+	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
+		    if ((str = grideye_call_testmethod(api->gp_name,
+						       (char *)api->gp_test_fn,
+						       argstr)) == NULL)
+			continue;
+	    } else {
+		if ((pret = api->gp_test_fn(argstr, &str)) < 0) {
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
+			       p->p_name, str?str:"");
+		    continue;
+		}
 	    }
-	    if (str){
+
+	    if (str) {
 		if (strcmp(api->gp_output_format, "json")==0){
 		    cxobj *xt= NULL;
 		    cbuf *cbj;
@@ -811,6 +1158,7 @@ echo_application_xml(cxobj         *xt,
 	    }
 	}
     }
+
     clicon_log(LOG_DEBUG, "grideye_agent: %s return:%s", __FUNCTION__, cbuf_get(cb));
     retval = 1; /* OK */
  done:
@@ -1253,8 +1601,8 @@ http_data(char               *url,
     char   *remoteip = NULL;
     struct timeval t2;
     int64_t i64;
-    static uint64_t aseq=0; 
-    
+    static uint64_t aseq=0;
+
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
@@ -1661,7 +2009,7 @@ main(int   argc,
     char               *userid = NULL;
     enum grideye_proto proto;
     char               *wi = NULL; /* Wireless interface */
-    char               *plugin_dir = NULL;
+    //char               *plugin_dir = NULL;
     struct plugin      *p;
     struct grideye_plugin_api *api;
     int                foreground;
@@ -1709,6 +2057,7 @@ main(int   argc,
 	clicon_err(OE_UNIX, errno, "gethostname");
 	exit(0);
     }
+
     clicon_log_init("grideye_agent", LOG_INFO, CLICON_LOG_STDERR);
     while ((c = getopt(argc, argv, GRIDEYE_AGENT_OPTS)) != -1){
 	switch (c) {
