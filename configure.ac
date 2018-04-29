@@ -75,7 +75,6 @@ AC_CHECK_LIB(cligen, cligen_init,, AC_MSG_ERROR(cligen missing. Try: git clone h
 AC_CHECK_HEADERS(clixon/clixon.h,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), [[ #include <cligen/cligen.h> ]])
 AC_SEARCH_LIBS(clicon_handle_init, clixon,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), -lcligen)
 
-
 AC_PROG_CC()
 AC_PROG_CPP
 AC_PROG_INSTALL
@@ -123,6 +122,21 @@ AC_CHECK_FUNCS(clock_gettime)
 AC_SUBST(GRIDEYE_PLUGIN_DIR, $libdir/grideye) # Bind to specific CLIgen version
 echo "LIBDIR: $libdir"
 echo "GRIDEYE_PLUGIN_DIR: $GRIDEYE_PLUGIN_DIR"
+
+# Check Python3
+echo Checking for python
+AC_PATH_PROGS(pathpython3, [python3 python3.6 python3.5 python3.4 python3.3 python3.2 python3.1 python3.0])
+if test -z "$pathpython3" ; then
+  AC_MSG_ERROR(I can't find python3);
+fi
+
+AC_PATH_PROGS(pathpython_config, [python3-config])
+if test -z "$pathpython_config" ; then
+  AC_MSG_NOTICE(I can't find python$PYTHON_VERSION-config. python$PYTHON_VERSION-config is required)
+fi
+
+CFLAGS+=" `$pathpython_config --includes`"
+LDFLAGS+=" `$pathpython_config --libs`"
 
 AC_OUTPUT(
 	Makefile
