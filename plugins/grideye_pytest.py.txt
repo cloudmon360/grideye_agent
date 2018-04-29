@@ -1,0 +1,29 @@
+GRIDEYE_PLUGIN_VERSION=2
+GRIDEYE_PLUGIN_MAGIC=0x3f687f03
+
+def pytest(instr):
+    print("pytest called")
+    return ["<tag>test</tag>"]
+
+def grideye_plugin_init(version):
+    print("Python plugin loaded! %d" % version)
+
+    grideye_plugin = [2,
+                      GRIDEYE_PLUGIN_MAGIC,
+                      "pytest",
+                      "str",
+                      "xml",
+                      None,
+                      "pytest",
+                      None
+    ]
+                      
+    if version != GRIDEYE_PLUGIN_VERSION:
+        print("Invalid version!")
+        return None
+
+    return grideye_plugin
+
+if __name__ == '__main__':
+    pytest("test")
+    grideye_plugin_init(2)
