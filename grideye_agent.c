@@ -748,7 +748,7 @@ url_post(char *url,
      * verification of the server's certificate. This makes the connection
      * A LOT LESS SECURE.
      */
-#if 1 /* Verify CA */
+#if 0 /* Verify CA */
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 #endif
     if (debug>1)
