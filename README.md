@@ -245,37 +245,38 @@ be named with grideye_ as a prefix to the name. For example
 A very simple Python plugin can look like this:
 
 ...
-    GRIDEYE_PLUGIN_VERSION=2
-    GRIDEYE_PLUGIN_MAGIC=0x3f687f03
+    
+	GRIDEYE_PLUGIN_VERSION=2
+	GRIDEYE_PLUGIN_MAGIC=
 
-    # The function which will be called to do the actual test
-    def pytest(instr):
-        print("pytest called")
+	# The function which will be called to do the actual test
+	def pytest(instr):
+		print("pytest called")
 
-        # Result data
-        return ["<xml-tag>value</xml-tag"]
+		# Result data
+		return ["<xml-tag>value</xml-tag"]
 
-    # This function will be called when the plugin is loaded.
-    def grideye_plugin_init(version):
-        print("Python plugin loaded! %d" % version)
+	# This function will be called when the plugin is loaded.
+	def grideye_plugin_init(version):
+		print("Python plugin loaded! %d" % version)
 
-        # This list of plugin parameters must be returned when
-    	# the plugin is loaded.
-    	grideye_plugin = [2,                    # Plugin version
-                      GRIDEYE_PLUGIN_MAGIC, # Plugin magic
-                      "pytest",             # Plugin name
-                      "str",                # Input format
-                      "xml",                # Output format
-                      None,                 # Setopt function
-                      "pytest",             # Test function
-                      None                  # Exit function
-    	]
+		# This list of plugin parameters must be returned when
+		# the plugin is loaded.
+		grideye_plugin = [2,		# Plugin version
+			GRIDEYE_PLUGIN_MAGIC,	# Plugin magic
+			"pytest",		# Plugin name
+			"str",			# Input format
+			"xml",			# Output format
+			None,			# Setopt function
+			"pytest",		# Test function
+			None			# Exit function
+		]
 
-    	if version != GRIDEYE_PLUGIN_VERSION:
-        	return None
+		if version != GRIDEYE_PLUGIN_VERSION:
+			return None
 
-    	# Return the list of parameters
-    	return grideye_plugin
+		# Return the list of parameters
+		return grideye_plugin
 ...
 
 There must be a function named grideye_plugin_init which takes one
