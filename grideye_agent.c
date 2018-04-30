@@ -257,8 +257,8 @@ static char
     PyObject *pymodule;
 
     char     *outstr;
-    char     *syscmd;
-    char     *modulename;
+    char     *syscmd = NULL;
+    char     *modulename = NULL;
 
     int      modulelen = 0;
     int      syscmdlen = 0;
@@ -353,11 +353,11 @@ grideye_plugin_load_py(void *handle,
 		       char *filename,
 		       struct plugin *plugins[])
 {
-    struct grideye_plugin_api *api;
-    int                       len;
+    struct grideye_plugin_api *api = NULL;
+    int                       len = 0;
     int                       retval = 0;
-    char                      *syscmd;
-    char                      *modulename;
+    char                      *syscmd = NULL;
+    char                      *modulename = NULL;
     int                       syscmdlen = 0;
     int                       modulelen = 0;
 
@@ -369,8 +369,8 @@ grideye_plugin_load_py(void *handle,
     PyObject                  *pyretval;
     PyObject                  *pyargs;
 
-    int                       gp_version;
-    int                       gp_magic;
+    int                       gp_version = 0;
+    int                       gp_magic = 0;
 
     modulename = strdup(name);
     modulelen = strlen(modulename);
@@ -467,7 +467,7 @@ grideye_plugin_load_py(void *handle,
     len = plugins_len(*plugins);
     if ((*plugins = realloc(*plugins, (len+2)*sizeof(struct plugin))) == NULL){
 	clicon_err(OE_UNIX, errno, "grideye_agent: realloc failed");
-	goto done;
+	goto fail;
     }
 
     memcpy(&(*plugins)[len+1], &(*plugins)[len], sizeof(struct plugin));
@@ -475,13 +475,13 @@ grideye_plugin_load_py(void *handle,
 
     if (((*plugins)[len].p_filename = strdup(name)) == NULL){
 	clicon_err(OE_UNIX, errno, "grideye_agent: strdup failed");
-	goto done;
+	goto fail;
     }
 
     /* Plugin name should be read for plugin itself, but use filename - ext */
     if (((*plugins)[len].p_name = strdup(api->gp_name)) == NULL){
 	clicon_err(OE_UNIX, errno, "grideye_agent: strdup failed");
-	goto done;
+	goto fail;
     }
 
     (*plugins)[len].p_api = api;
@@ -503,7 +503,7 @@ grideye_plugin_load_py(void *handle,
  * add it.
  */
 static int
-grideye_plugin_load_so(void          *handle,
+grideye_plugin_load_so(void       *handle,
 		    char          *name,
 		    char          *filename,
 		    struct plugin *plugins[]
@@ -512,7 +512,7 @@ grideye_plugin_load_so(void          *handle,
     int                           retval = -1;
     char                          *dlerrcode;
     grideye_plugin_init_t         *initfun;
-    struct grideye_plugin_api     *api;
+    struct grideye_plugin_api     *api = NULL;
     int                           len;
 
     /* Try v2 */
@@ -589,7 +589,7 @@ plugin_load_dir(char          *dir,
     char          *name;
     int            off_so;
     int            off_py;
-    char          *filename;
+    char          *filename = NULL;
     int            len;
 
     if ((dirp = opendir(dir)) == NULL) {
@@ -622,6 +622,7 @@ plugin_load_dir(char          *dir,
 	   clicon_err(OE_UNIX, errno, "malloc");
 	   goto done;
        }
+
        snprintf(filename, len, "%s/%s", dir, name);
 
        if (strcmp(".so.1", name + off_so) == 0) {
@@ -796,7 +797,7 @@ url_post(char *url,
     retval = 1;
   done:
     if (list)
-	curl_slist_free_all(list); 
+	curl_slist_free_all(list);
     if (err)
 	free(err);
     if (xr)
@@ -2022,7 +2023,7 @@ main(int   argc,
     int                ok;
     char               pidfile[MAXPATHLEN];
     cxobj             *xtest = NULL;
-    int                interval;
+    int                interval = 0;
     struct timeval     ct0;
     struct timeval     ct1;
     uint64_t           sseq;
