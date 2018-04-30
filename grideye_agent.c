@@ -235,7 +235,7 @@ grideye_pyobj_to_long(PyObject *pyobj)
 	if (ret == -1 || ret > long_max)
 		goto fail;
 
-	return (uint32_t)ret;
+	return ret;
 
 fail:
 	return -1;
