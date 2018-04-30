@@ -243,11 +243,9 @@ be named with grideye_ as a prefix to the name. For example
 "grideye_pytest.py".
 
 A very simple Python plugin can look like this:
-
-...
     
 	GRIDEYE_PLUGIN_VERSION=2
-	GRIDEYE_PLUGIN_MAGIC=
+	GRIDEYE_PLUGIN_MAGIC=0x3f687f03
 
 	# The function which will be called to do the actual test
 	def pytest(instr):
@@ -277,7 +275,6 @@ A very simple Python plugin can look like this:
 
 		# Return the list of parameters
 		return grideye_plugin
-...
 
 There must be a function named grideye_plugin_init which takes one
 argument. The function should then return a list of items described
