@@ -244,7 +244,7 @@ be named with grideye_ as a prefix to the name. For example
 
 A very simple Python plugin can look like this:
 
---- Python code start ---
+...
 GRIDEYE_PLUGIN_VERSION=2
 GRIDEYE_PLUGIN_MAGIC=0x3f687f03
 
@@ -276,7 +276,7 @@ def grideye_plugin_init(version):
 
     # Return the list of parameters
     return grideye_plugin
---- Python code end ---
+...
 
 There must be a function named grideye_plugin_init which takes one
 argument. The function should then return a list of items described
