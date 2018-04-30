@@ -9,10 +9,12 @@ Cloud monitoring agent.
   * [Licenses](#4-licenses)
   * [Contact](#5-contact)
 
-Grideye_agent is part of the Grideye cloud monitoring software. Grideye consists of a controller, a dashboard, and agents. This is the agent part.  
+Grideye_agent is part of the Grideye cloud monitoring
+software. Grideye consists of a controller, a dashboard, and
+agents. This is the agent part.
 
 The grideye agent can be run in a process, in a VM or in a
-container. It communicates with a grideye controller. 
+container. It communicates with a grideye controller.
 
 ## 1. Starting
 
@@ -28,7 +30,9 @@ where
 - 'id' is the UUID of the user as gievn in the controller.
 - 'name' is the name of the agent as it will appear in grideye plots.
 
-As an alternative grideye_agent can be run as a docker container. Simply pull the grideye_agent from DockerHub and pass the needed URL, name and UUID as variables.
+As an alternative grideye_agent can be run as a docker
+container. Simply pull the grideye_agent from DockerHub and pass the
+needed URL, name and UUID as variables.
 
 For example:
 
@@ -42,10 +46,12 @@ A typical installation is as follows:
     > make                      # Compile
     > sudo make install         # Install agent and plugins
 
-The source builds one main program: grideye_agent. An
-example startup-script is available in util/grideye_agent.
+The source builds one main program: grideye_agent. An example
+startup-script is available in util/grideye_agent.
 
-Grideye_agent requires [CLIgen](http://www.cligen.se) and [CLIXON](http://www.clicon.org) for building. To build and install CLIgen and CLIXON:
+Grideye_agent requires [CLIgen](http://www.cligen.se) and
+[CLIXON](http://www.clicon.org) for building. To build and install
+CLIgen and CLIXON:
 
     git clone https://github.com/olofhagsand/cligen.git
     cd cligen; configure; make; sudo make install
@@ -62,10 +68,11 @@ Grideye_agent contains an open plugin interface.  Several plugins
 are included in this release. Other authors have (and can) contribute
 to the plugins. 
 
-The following steps illustrate how to add the Nagios (*check_http*)[https://www.monitoring-plugins.org/doc/man/check_http.html]
-test plugin and how to incorporate it to produce input to
-grideye. 
-There are lots of Nagios plugins making it an easy way to extend Grideye.
+The following steps illustrate how to add the Nagios
+(*check_http*)[https://www.monitoring-plugins.org/doc/man/check_http.html]
+test plugin and how to incorporate it to produce input to grideye.
+There are lots of Nagios plugins making it an easy way to extend
+Grideye.
 
 ### 3.1 The API
 
@@ -228,6 +235,59 @@ template to invoke the new test:
        </plugin>
     </test>
 ```
+
+### 3.9 Plugins written in Python
+
+Plugins can now be written in Python as well as in C. The plugin must
+be named with grideye_ as a prefix to the name. For example
+"grideye_pytest.py".
+
+A very simple Python plugin can look like this:
+
+--- Python code start ---
+GRIDEYE_PLUGIN_VERSION=2
+GRIDEYE_PLUGIN_MAGIC=0x3f687f03
+
+# The function which will be called to do the actual test
+def pytest(instr):
+    print("pytest called")
+
+    # Result data
+    return ["<xml-tag>value</xml-tag"]
+
+# This function will be called when the plugin is loaded.
+def grideye_plugin_init(version):
+    print("Python plugin loaded! %d" % version)
+
+    # This list of plugin parameters must be returned when
+    # the plugin is loaded.
+    grideye_plugin = [2,                    # Plugin version
+                      GRIDEYE_PLUGIN_MAGIC, # Plugin magic
+                      "pytest",             # Plugin name
+                      "str",                # Input format
+                      "xml",                # Output format
+                      None,                 # Setopt function
+                      "pytest",             # Test function
+                      None                  # Exit function
+    ]
+
+    if version != GRIDEYE_PLUGIN_VERSION:
+        return None
+
+    # Return the list of parameters
+    return grideye_plugin
+--- Python code end ---
+
+There must be a function named grideye_plugin_init which takes one
+argument. The function should then return a list of items described
+above.
+
+When the plugins are called periodically the test function will be
+called. This function is responsible for the actual test and should
+return a list with one string describing the test result metric.
+
+The test function will get the parameter configured on the controller
+as its only argument.
 
 ## 4. Licenses
 
