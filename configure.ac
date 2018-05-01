@@ -124,19 +124,19 @@ echo "LIBDIR: $libdir"
 echo "GRIDEYE_PLUGIN_DIR: $GRIDEYE_PLUGIN_DIR"
 
 # Check Python3
+
 echo Checking for python
-AC_PATH_PROGS(pathpython3, [python3 python3.6 python3.5 python3.4 python3.3 python3.2 python3.1 python3.0])
-if test -z "$pathpython3" ; then
-  AC_MSG_ERROR(I can't find python3);
+
+PYINCLUDES=`python3-config --includes | awk '{print $2}' | sed 's/-I//'`
+AC_CHECK_HEADER($PYINCLUDES/Python.h,, AC_MSG_ERROR(Python.h missing. Try: apt-get install python3-dev libpython3-dev on Debian based systems))
+
+AC_PATH_PROGS(PATHPYCONF, [python3-config])
+if test -z "$PATHPYCONF" ; then
+  AC_MSG_ERROR(python3-config missing. Try: apt-get install python3-dev libpython3-dev on Debian based systems.);
 fi
 
-AC_PATH_PROGS(pathpython_config, [python3-config])
-if test -z "$pathpython_config" ; then
-  AC_MSG_NOTICE(I can't find python$PYTHON_VERSION-config. python$PYTHON_VERSION-config is required)
-fi
-
-CFLAGS+=" `$pathpython_config --includes`"
-LDFLAGS+=" `$pathpython_config --libs`"
+CFLAGS+=" `$PATHPYCONF --includes`"
+LDFLAGS+=" `$PATHPYCONF --libs`"
 
 AC_OUTPUT(
 	Makefile
