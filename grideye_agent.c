@@ -92,7 +92,7 @@ extern const char GRIDEYE_VERSION[];
 /* Set this to a file (prefix) and this will dump incoming binary messages */
 //#define DUMPMSGFILE "grideyedump"
 
-#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:p:rLdw:P:zk:"
+#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:p:rLdw:P:zk:s"
 
 #define DISKIO_DIR        "/var/tmp"  /* in current dir */
 #define DISKIO_LARGEFILE  "GRIDEYE_LARGEFILE" /* To use for random read ops */
@@ -167,6 +167,7 @@ static int     quiet = 0;
 static struct plugin *plugins = NULL;
 static char    *pidfile = GRIDEYE_AGENT_PIDFILE;
 static char *plugin_dir = NULL;
+static int ssl_verifypeer = 0;
 
 /*
  *! Return number of plugins in plugins vector. This is one less than vectorlen
@@ -749,9 +750,9 @@ url_post(char *url,
      * verification of the server's certificate. This makes the connection
      * A LOT LESS SECURE.
      */
-#if 0 /* Verify CA */
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-#endif
+
+    if (ssl_verifypeer == 1)
+	    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
     if (debug>1)
 	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
     if (header){
@@ -1963,7 +1964,8 @@ usage(char *argv0)
 	    "\t-w [ifname]\tWireless interface\n"
 	    "\t-P <dir>\tPlugin directory(default: %s)\n"
 	    "\t-z \t\tKill other config daemon and exit\n"
-	    "\t-k <pidfile> \tPidfile, default: %s\n",
+	    "\t-k <pidfile> \tPidfile, default: %s\n"
+	    "\t-s \t\tDon't verify the servers SSL certificate, MUCH less secure\n",
 	    argv0,
 	    CALLHOME_DEFAULT,
 	    DISKIO_DIR,
@@ -2052,6 +2054,7 @@ main(int   argc,
     foreground = 0;
     proto = GRIDEYE_PROTO_HTTP;
     strncpy(pidfile, GRIDEYE_AGENT_PIDFILE, sizeof(pidfile)-1);
+    ssl_verifypeer = 0;
 
     /* Hostname for logs and callbacks, overwritten by -N */
     if (gethostname(hostname, sizeof(hostname)) < 0) {
@@ -2144,6 +2147,9 @@ main(int   argc,
 	    break;
 	case 'k':    /* PID file*/
 	    strncpy(pidfile, optarg, sizeof(pidfile)-1);
+	    break;
+	case 's':    /* SSL verify peer */
+	    ssl_verifypeer = 1;
 	    break;
 	} /* switch */
     } /* while */
