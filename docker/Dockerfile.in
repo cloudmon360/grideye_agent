@@ -13,7 +13,11 @@ RUN apt-get update && apt-get install -y \
     automake \
     flex \
     bison \
-    libcurl4-openssl-dev
+    libcurl4-openssl-dev \
+    libfcgi-dev \
+    python3-dev \
+    libpython3-dev \
+    sysstat
 
 # Create a directory to hold source-code, dependencies etc
 RUN mkdir /grideye
@@ -32,7 +36,8 @@ RUN make install
 
 # Build clixon
 WORKDIR /grideye/clixon
-RUN ./configure --without-restconf --without-keyvalue
+RUN git checkout -b develop origin/develop
+RUN ./configure
 RUN make
 RUN make install
 RUN make install-include
@@ -46,17 +51,10 @@ RUN make install
 WORKDIR /grideye/grideye_agent/plugins/
 RUN make install
 
-RUN ldconfig
+RUN rm -r /grideye
 
 # Create a file for disk IO tests
 RUN /bin/dd if=/dev/zero of=/var/tmp/GRIDEYE_LARGEFILE bs=1M count=1K
 
 # Run grideye-agent
-CMD grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -p udp :7878 
-
-EXPOSE 7878 7878/udp
-
-
-
-
-
+CMD grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s
