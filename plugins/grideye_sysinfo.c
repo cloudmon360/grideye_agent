@@ -51,7 +51,8 @@ get_cpu(pid_t pid)
 
     FILE *fd;
     char buffer[BUF_MAX];
-
+    int retval = 0;
+    
     sprintf(pidstat, "/proc/%d/stat", pid);
 
     if ((fd = fopen(pidstat, "r")) == NULL)
@@ -60,10 +61,17 @@ get_cpu(pid_t pid)
 	perror ("Error"); }
     if (sscanf (buffer, "%*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s" \
 		"%*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %*s" \
-		"%*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %d", &cpu) == -1)
-	return -1;
+		"%*s %*s %*s %*s %*s %*s %*s %*s %*s %*s %d", &cpu) == -1) {
+	    retval = -1;
+	    goto done;
+    }
 
-    return cpu;
+    retval = cpu;
+    
+done:
+    fclose(fd);
+
+    return retval;
 }
 
 /*
