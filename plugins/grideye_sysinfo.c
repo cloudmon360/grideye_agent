@@ -77,13 +77,13 @@ done:
 /*
  * Get CPU load in percent
  */
-double
+float
 get_cpu_load(int cpu)
 {
     FILE *fp;
     char buffer[1024];
     char command[128];
-    float usr;
+    float usr = 0;
 
     if (cpu == -1) {
 	sprintf(command, "mpstat 1 1");
