@@ -1,6 +1,6 @@
 FROM debian
 
-MAINTAINER Olof Hagsand <olof@hagsand.se>
+MAINTAINER Olof Hagsand <kristofer.hallin@cloudmon360.com>
 
 ENV DEBIAN_FRONTEND noninteractive
 
