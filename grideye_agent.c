@@ -699,7 +699,8 @@ curl_get_cb(void  *ptr,
  * @param[in]  header   If set, send as header, eg "Content-Type: application/yang-data+xml"
  * @param[out] getdata  Pointer to return data, if given, free with malloc
  * @param[out] remoteip Pointer remote IP address in string format
- * @retval    -1   fatal error
+ * @retval    -2   fatal error
+ * @retval    -1   non fatal error. Log error and try again
  * @retval     0   expect set but did not expected return or other non-fatal error
  * @retval     1   ok
  * Note: Code taken from grideye
@@ -716,7 +717,7 @@ url_post(char *url,
 {
     CURL      *curl = NULL;
     char      *err = NULL;
-    int        retval = -1;
+    int        retval = -2;
     cxobj     *xr = NULL; /* reply xml */
     struct curlbuf cb = {0, };
     CURLcode   errcode;
@@ -751,8 +752,10 @@ url_post(char *url,
      * A LOT LESS SECURE.
      */
 
-    if (ssl_verifypeer == 1)
-	    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    if (ssl_verifypeer > 0)
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    if (ssl_verifypeer > 1)
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     if (debug>1)
 	curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
     if (header){
@@ -761,10 +764,19 @@ url_post(char *url,
     }
 
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600); /* 10 min */
-
-    if ((errcode = curl_easy_perform(curl)) != CURLE_OK){
-	clicon_err(OE_UNIX, errcode, "curl_easy_perform: %s", err);
+    errcode = curl_easy_perform(curl);
+    switch (errcode){
+    case CURLE_COULDNT_RESOLVE_HOST:
+	clicon_log(LOG_NOTICE, "%s: %s", url, curl_easy_strerror(errcode));
+	retval = -1; /* non-fatal */
 	goto done;
+	break;
+    case CURLE_OK:
+	clicon_log(LOG_NOTICE, "%s: %s", url, curl_easy_strerror(errcode));
+	break;
+    default:
+	clicon_err(OE_UNIX, 0, "curl_easy_perform: %s %s errcode:%d",
+		   curl_easy_strerror(errcode), err, errcode);
     }
     if (remoteip &&
 	curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &ip) == CURLE_OK)
@@ -1469,7 +1481,8 @@ callhome_http(char               *url,
     struct sockaddr_in sndaddr = {0,};
     struct plugin *p;
     int    i;
-
+    int    ret;
+    
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
@@ -1499,9 +1512,17 @@ callhome_http(char               *url,
     cprintf(cb, "\"proto\":\"%s\"", grideye_proto2str(proto));
     cprintf(cb, "}}");
     cprintf(ub, "%s/restconf/operations/grideye:callhome", url);
-    if (url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+json", NULL,
-		 &getdata, &remoteip) < 0)
+    ret = url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+json", NULL,
+		   &getdata, &remoteip);
+    switch (ret){
+    case -2: /* fatal */
 	goto done;
+    case -1: /* non-fatal */
+	*natstate = 0;
+	goto ok;
+    default:
+	break;
+    }
     if (getdata == NULL)
 	goto done;
     /* xml parse reply: here is where we get the port */
@@ -1564,6 +1585,7 @@ callhome_http(char               *url,
     default:
       break;
     }
+ ok:
     retval = 0;
  done:
     if (remoteip)
@@ -1592,6 +1614,7 @@ http_data(char               *url,
 	  uint64_t           *sseq,
 	  struct timeval     *t0,
 	  struct timeval     *t1,
+	  int                *natstate,
 	  cxobj             **xplugin)
 {
     int     retval = -1;
@@ -1604,7 +1627,9 @@ http_data(char               *url,
     struct timeval t2;
     int64_t i64;
     static uint64_t aseq=0;
+    int     ret;
 
+    *interval = 10000;/* 10s default, on error can be 0 */
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
@@ -1628,9 +1653,18 @@ http_data(char               *url,
 	cprintf(cb, "%s", cbuf_get(cbmetr));
     cprintf(cb, "</input>");
     cprintf(ub, "%s/restconf/operations/grideye:agent-data", url);
-    if (url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+xml",
-		 NULL, &getdata, &remoteip) < 0)
+    ret = url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+xml",
+		   NULL, &getdata, &remoteip);
+    switch (ret){
+    case -2: /* fatal */
 	goto done;
+	break;
+    case -1: /* non-fatal */
+	*natstate = 0;
+	goto ok;
+    default:
+	break;
+    }
     gettimeofday(t1, NULL);
     if (json_parse_str(getdata, &xreply) < 0){
 	clicon_log(LOG_WARNING,  "grideye_agent: %s: json parse error: %s", __FUNCTION__, getdata);
@@ -1651,6 +1685,7 @@ http_data(char               *url,
 	if (xml_copy(x, *xplugin) < 0)
 	    goto done;
     clicon_debug(1, "%s getdata:%s", __FUNCTION__, getdata);
+ ok:
     retval = 0;
  done:
     if (remoteip)
@@ -1665,7 +1700,6 @@ http_data(char               *url,
 	cbuf_free(cb);
     return retval;
 }
-
 
 /*! This is for NAT traversal: send udp towards server just to open existing stream 
  * Timeout only when there havent been any packets for some time.
@@ -1965,7 +1999,8 @@ usage(char *argv0)
 	    "\t-P <dir>\tPlugin directory(default: %s)\n"
 	    "\t-z \t\tKill other config daemon and exit\n"
 	    "\t-k <pidfile> \tPidfile, default: %s\n"
-	    "\t-s \t\tDon't verify the servers SSL certificate, MUCH less secure\n",
+	    "\t-s \t\tDon't verify the servers SSL certificate, MUCH less secure.\n"
+	    "\t-s -s \tConnection succeeds regardless of the names in the certificate.\n",
 	    argv0,
 	    CALLHOME_DEFAULT,
 	    DISKIO_DIR,
@@ -2149,7 +2184,7 @@ main(int   argc,
 	    strncpy(pidfile, optarg, sizeof(pidfile)-1);
 	    break;
 	case 's':    /* SSL verify peer */
-	    ssl_verifypeer = 1;
+	    ssl_verifypeer++;
 	    break;
 	} /* switch */
     } /* while */
@@ -2330,6 +2365,7 @@ main(int   argc,
 			  &interval,
 			  &sseq,
 			  &ct0, &ct1,
+			  &natstate,
 			  &xtest) < 0)
 		goto done;
 	break;
@@ -2405,32 +2441,47 @@ main(int   argc,
 	case GRIDEYE_PROTO_HTTP: /* Eeeh need timer */
 	    {
 		cbuf *cb;
-		if ((cb = cbuf_new()) ==NULL){
-		    clicon_err(OE_PLUGIN, errno, "cbuf_new");
-		    goto done;
+		
+		if (natstate != 2){
+		    interval = 10000;
+		    if (callhome_http(callhome_url,
+				      hostname,
+				      userid,
+				      proto,
+				      NULL,
+				      info,
+				      &natstate) < 0)
+			goto done;
 		}
-		if ((retval = echo_application_xml(xtest,
-						   cb,
-						   plugins)) < 0)
-		    goto done;
-		if (xtest){
-		    xml_free(xtest);
-		    xtest = NULL;
-		}
-		if ((xtest = xml_new("new", NULL, NULL)) == NULL)
-		    goto done;
-		if (http_data(callhome_url,
-			      hostname,
-			      userid,
-			      cb,
-			      &interval,
-			      &sseq,
-			      &ct0, &ct1,
-			      &xtest) < 0)
-		    goto done;
-		if (cb){
-		    cbuf_free(cb);
-		    cb = NULL;
+		else{
+		    if ((cb = cbuf_new()) ==NULL){
+			clicon_err(OE_PLUGIN, errno, "cbuf_new");
+			goto done;
+		    }
+		    if ((retval = echo_application_xml(xtest,
+						       cb,
+						       plugins)) < 0)
+			goto done;
+		    if (xtest){
+			xml_free(xtest);
+			xtest = NULL;
+		    }
+		    if ((xtest = xml_new("new", NULL, NULL)) == NULL)
+			goto done;
+		    if (http_data(callhome_url,
+				  hostname,
+				  userid,
+				  cb,
+				  &interval,
+				  &sseq,
+				  &ct0, &ct1,
+				  &natstate,
+				  &xtest) < 0)
+			goto done;
+		    if (cb){
+			cbuf_free(cb);
+			cb = NULL;
+		    }
 		}
 	    }
 	    break;
