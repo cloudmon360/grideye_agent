@@ -1,5 +1,3 @@
-# Jenkinsfile 
-# Specifies a build pipe for the Grideye Agent
 node {
      stage('Checkout') {
         git url: 'https://github.com/cloudmon360/grideye_agent.git'
