@@ -89,6 +89,9 @@ int fork_exec_read(char *buf, int buflen, ...)
 	    fprintf(stderr, "execv %s: %s\n",  argv[0], strerror(errno));
 	    exit(1);
 	}
+
+	if (argv)
+		free(argv);
 	
 	exit(0); /* Not reached */
     }
