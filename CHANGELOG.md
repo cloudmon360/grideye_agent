@@ -1,5 +1,6 @@
 # Grideye_agent Changelog
 
+* Hardening after AFL and valgrind runs
 * Added curl-timeout (-T) with default value 1min
 * For http controller communication, added resiliency for curl couldn't connect, timeout and bad gateway.
 	

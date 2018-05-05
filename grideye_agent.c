@@ -116,7 +116,7 @@ extern const char GRIDEYE_VERSION[];
 /* Run with american fuzzy lop http://lcamtuf.coredump.cx/afl 
  * Only runs with -p http and replaces curl with stdin/stdout
  */
-#define FUZZ 1
+#undef FUZZ
 
 /* By default, this is where grideye_agent looks for plugins
  * This is normally set in configure/Makefile as $exec_prefix/lib/grideye
@@ -748,17 +748,25 @@ url_post(char *url,
 #ifdef FUZZ
     if (fuzz){
       char *s;
-      if ((*getdata = malloc(2048))== NULL){
+      int   len=10*1024;
+
+      if ((*getdata = malloc(len))== NULL){
 	clicon_err(OE_PLUGIN, errno, "malloc");
 	goto done;
       }
       fprintf(stderr, "%s\n", putdata);
-      if ((s=fgets(*getdata, 2048, stdin)) == NULL){
-	clicon_err(OE_PLUGIN, errno, "fgets");
-	goto done;
+      /* Help text for manual fuzzing */
+      fprintf(stdout, "FUZZ:"); fflush(stdout);
+      errno = 0;
+      if ((s=fgets(*getdata, len, stdin)) == NULL){
+	  if (feof(stdin))
+	      exit(0);
+	  clicon_err(OE_PLUGIN, errno, "fgets: %d", errno);
+	  goto done;
       }
-      if (s && strlen(s) && s[0]!='{')
+      if (s && strlen(s) && s[0]=='q') /* termination criteria */
 	exit(0);
+      //      fprintf(stdout, "\nGOT:%s", s); fflush(stdout);
       return 0;
     }
 #endif /* FUZZ */
@@ -1679,6 +1687,7 @@ http_data(char               *url,
 	  char               *id,
 	  cbuf               *cbmetr,
 	  uint64_t           *sseq,
+	  int                *tvalid,
 	  struct timeval     *t0,
 	  struct timeval     *t1,
 	  int                 curl_timeout,
@@ -1697,9 +1706,11 @@ http_data(char               *url,
     int64_t i64;
     static uint64_t aseq=0;
     int     ret;
+    char   *xbody;
+    char   *reason = NULL;
 
     clicon_debug(1, "%s", __FUNCTION__);
-    *interval = 10000;/* 10s default, on error can be 0 */
+    *interval = 10000; /* 10s default, on error can be 0 */
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
@@ -1711,11 +1722,13 @@ http_data(char               *url,
     cprintf(cb, "<input>");
     cprintf(cb, "<name>%s</name>", name);
     cprintf(cb, "<userid>%s</userid>", id);
-    cprintf(cb, "<aseqn>%" PRIu64 "</aseqn>", aseq++);
     cprintf(cb, "<sseqn>%" PRIu64 "</sseqn>", *sseq);
-    cprintf(cb, "<t0>%ld.%06ld</t0>", t0->tv_sec, t0->tv_usec);
     if (cbmetr){
-	cprintf(cb, "<t1>%ld.%06ld</t1>", t1->tv_sec, t1->tv_usec);
+	cprintf(cb, "<aseqn>%" PRIu64 "</aseqn>", aseq++);
+	if (*tvalid){
+	    cprintf(cb, "<t0>%ld.%06ld</t0>", t0->tv_sec, t0->tv_usec);
+	    cprintf(cb, "<t1>%ld.%06ld</t1>", t1->tv_sec, t1->tv_usec);
+	}
 	gettimeofday(&t2, NULL);
 	cprintf(cb, "<t2>%ld.%06ld</t2>", t2.tv_sec, t2.tv_usec);
 	cprintf(cb, "%s", cbuf_get(cbmetr));
@@ -1735,6 +1748,7 @@ http_data(char               *url,
     default:
 	break;
     }
+    *tvalid = 0;
     gettimeofday(t1, NULL);
     /* XXX KLUDGE TO SEE IF IT IS XML. ERROR COMES AS HTML 
      * In all cases, go back to callhome mode.
@@ -1751,18 +1765,34 @@ http_data(char               *url,
 	*natstate = 0;
 	goto ok;
     }
-    else if (json_parse_str(getdata, &xreply) < 0){
-	clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
-	goto ok;
+    else {
+	if (json_parse_str(getdata, &xreply) < 0){
+	    clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
+	    goto ok;
+	}
     }
-    if ((x = xpath_first(xreply, "//interval")) != NULL)
-	*interval = atoi(xml_body(x));
-    if ((x = xpath_first(xreply, "//sseqn")) != NULL)
-	*sseq = atoi(xml_body(x));
+    if ((x = xpath_first(xreply, "//interval")) != NULL){
+	xbody = xml_body(x);
+	*interval = atoi(xbody);
+    }
+    if ((x = xpath_first(xreply, "//sseqn")) != NULL){
+	xbody = xml_body(x);
+	*sseq = atoi(xbody);
+    }
     if ((x = xpath_first(xreply, "//t0")) != NULL){
-	parse_dec64(xml_body(x), 6, &i64, NULL);
+	xbody = xml_body(x);
+	if (parse_dec64(xbody, 6, &i64, &reason) < 0){
+	    clicon_err(OE_XML, errno, "parse_dec64: %s", xbody);	    
+	    goto done;
+	}
+	if (reason){
+	    clicon_log(LOG_WARNING,  "%s: Invalid timestamp %s: %s", __FUNCTION__, xbody, reason);
+	    *natstate = 0;
+	    goto ok;
+	}
 	t0->tv_sec = i64/1000000;;
 	t0->tv_usec = i64%1000000;
+	*tvalid = 1;
     }
     if ((x = xpath_first(xreply, "output")) != NULL)
 	if (xml_copy(x, *xplugin) < 0)
@@ -1770,6 +1800,9 @@ http_data(char               *url,
  ok:
     retval = 0;
  done:
+    clicon_debug(1, "%s retval:%d", __FUNCTION__, retval);
+    if (reason)
+	free(reason);
     if (remoteip)
 	free(remoteip);
     if (xreply)
@@ -2150,6 +2183,7 @@ main(int   argc,
     char               pidfile[MAXPATHLEN];
     cxobj             *xtest = NULL;
     int                interval = 1000;
+    int                ctvalid = 0; /* If ct0 and ct1 are valid */
     struct timeval     ct0;
     struct timeval     ct1;
     uint64_t           sseq = 0;
@@ -2463,7 +2497,7 @@ main(int   argc,
 			  userid,
 			  NULL,
 			  &sseq,
-			  &ct0, &ct1,
+			  &ctvalid, &ct0, &ct1,
 			  curl_timeout,
 			  &natstate,
 			  &interval,
@@ -2543,9 +2577,8 @@ main(int   argc,
 	case GRIDEYE_PROTO_HTTP: /* Eeeh need timer */
 	    {
 		cbuf *cb;
-		
 		if (natstate != 2){
-		    interval = 10000;
+		    interval = 100;
 		    if (callhome_http(callhome_url,
 				      hostname,
 				      userid,
@@ -2576,12 +2609,13 @@ main(int   argc,
 				  userid,
 				  cb,
 				  &sseq,
-				  &ct0, &ct1,
+				  &ctvalid, &ct0, &ct1,
 				  curl_timeout,
 				  &natstate,
 				  &interval,
 				  &xtest) < 0)
 			goto done;
+
 		    if (cb){
 			cbuf_free(cb);
 			cb = NULL;
