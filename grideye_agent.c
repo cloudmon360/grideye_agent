@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015-2017 Olof Hagsand
+  Copyright (C) 2015-2018 Olof Hagsand
 
   This file is part of GRIDEYE.
 
@@ -92,8 +92,6 @@ extern const char GRIDEYE_VERSION[];
 /* Set this to a file (prefix) and this will dump incoming binary messages */
 //#define DUMPMSGFILE "grideyedump"
 
-#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:p:rLdw:P:zk:"
-
 #define DISKIO_DIR        "/var/tmp"  /* in current dir */
 #define DISKIO_LARGEFILE  "GRIDEYE_LARGEFILE" /* To use for random read ops */
 #define DISKIO_WRITEFILE  "GRIDEYE_WRITEFILE" /* To use for trunc writing */
@@ -112,6 +110,11 @@ extern const char GRIDEYE_VERSION[];
 /* Wireless file to read status from */
 #define PROC_NET_WIRELESS "/proc/net/wireless"
 
+/* Run with american fuzzy lop http://lcamtuf.coredump.cx/afl 
+ * Only runs with -p http and replaces curl with stdin/stdout
+ */
+#define FUZZ 1
+
 /* By default, this is where grideye_agent looks for plugins
  * This is normally set in configure/Makefile as $exec_prefix/lib/grideye
  * eg /usr/local/lib/grideye.
@@ -121,6 +124,12 @@ extern const char GRIDEYE_VERSION[];
 #endif
 
 #define GRIDEYE_PLUGIN_PYTHON 0x50595448
+
+#ifdef FUZZ
+#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:p:rLdw:P:zk:Z"
+#else
+#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:p:rLdw:P:zk:"
+#endif
 
 /*
  * Local types
@@ -167,6 +176,11 @@ static int     quiet = 0;
 static struct plugin *plugins = NULL;
 static char    *pidfile = GRIDEYE_AGENT_PIDFILE;
 static char *plugin_dir = NULL;
+
+#ifdef FUZZ
+/* AFL fuzzing simulation */
+static int fuzz = 0;
+#endif
 
 /*
  *! Return number of plugins in plugins vector. This is one less than vectorlen
@@ -722,6 +736,23 @@ url_post(char *url,
     char      *ip = NULL;
     struct curl_slist *list = NULL;
 
+#ifdef FUZZ
+    if (fuzz){
+      char *s;
+      if ((*getdata = malloc(2048))== NULL){
+	clicon_err(OE_PLUGIN, errno, "malloc");
+	goto done;
+      }
+      fprintf(stderr, "%s\n", putdata);
+      if ((s=fgets(*getdata, 2048, stdin)) == NULL){
+	clicon_err(OE_PLUGIN, errno, "fgets");
+	goto done;
+      }
+      if (s && strlen(s) && s[0]!='{')
+	exit(0);
+      return 0;
+    }
+#endif /* FUZZ */
     /* Try it with  curl -X PUT -d '*/
     clicon_log(LOG_DEBUG,  "%s:  curl -X POST -d '%s' %s",
 	       __FUNCTION__, putdata, url);
@@ -1960,6 +1991,9 @@ usage(char *argv0)
 	    "\t-r \t\tSynthetic reorder of pkt 30\n"
 	    "\t-L \t\tSynthetic loss of pkt 20\n"
 	    "\t-d \t\tSynthetic duplicate of pkt 40\n"
+#ifdef FUZZ
+	    "\t-Z \t\tFuzz (afl) simulation\n"
+#endif
 	    "\t-w [ifname]\tWireless interface\n"
 	    "\t-P <dir>\tPlugin directory(default: %s)\n"
 	    "\t-z \t\tKill other config daemon and exit\n"
@@ -2052,7 +2086,9 @@ main(int   argc,
     foreground = 0;
     proto = GRIDEYE_PROTO_HTTP;
     strncpy(pidfile, GRIDEYE_AGENT_PIDFILE, sizeof(pidfile)-1);
-
+#ifdef FUZZ
+    fuzz = 0;
+#endif
     /* Hostname for logs and callbacks, overwritten by -N */
     if (gethostname(hostname, sizeof(hostname)) < 0) {
 	clicon_err(OE_UNIX, errno, "gethostname");
@@ -2145,6 +2181,11 @@ main(int   argc,
 	case 'k':    /* PID file*/
 	    strncpy(pidfile, optarg, sizeof(pidfile)-1);
 	    break;
+#ifdef FUZZ
+	case 'Z':    /* Fuzzing simulation */
+	    fuzz++;
+	    break;
+#endif
 	} /* switch */
     } /* while */
     clicon_log(LOG_DEBUG, "grideye_agent: wi:%s", wi);
