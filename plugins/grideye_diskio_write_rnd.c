@@ -44,6 +44,7 @@ static const struct grideye_plugin_api api = {
     "diskio_write_rnd",
     "str",            /* input format */
     "xml",            /* output format */
+    NULL,
     diskio_write_rnd_setopt,
     diskio_write_rnd_test,
     diskio_write_rnd_exit

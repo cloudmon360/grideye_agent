@@ -48,6 +48,7 @@ static const struct grideye_plugin_api api = {
     "iwget",
     NULL,            /* input format */
     "xml",            /* output format */
+    NULL,
     iwget_setopt,
     iwget_test,
     iwget_exit

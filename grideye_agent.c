@@ -854,6 +854,7 @@ url_post(char *url,
     }
     if (getdata && cb.b_buf){
 	*getdata = cb.b_buf;
+	clicon_debug(1, "%s: getdata:%s", __FUNCTION__, *getdata);
 	cb.b_buf = NULL;
     }
     retval = 1;
@@ -1503,8 +1504,9 @@ echo_packet(int            s,
  * @param[in]  id
  * @param[in]  proto
  * @param[in]  myaddr        Address, port of locally bound socket
- * @param[in]  info          Onfo about this node/agent
+ * @param[in]  info          Info about this node/agent
  * @param[in]  curl_timeout  Curl post request timeout in seconds
+ * @param[in]  yang_metrics  New yang metrics required for this agent
  * @param[in,out] natstate   0:none 1:enabled 2:addr&port defined 3: connected
  * @see nattraversal_udp
  * XXX: problem with using curl primary_ip in registering server. Eg curl localhost can resolve to
@@ -1518,6 +1520,7 @@ callhome_http(char               *url,
 	      struct sockaddr_in *myaddr,
 	      char               *info,
 	      int                 curl_timeout,
+	      const char         *yangmetrics,
 	      int                *natstate)
 {
     int    retval = -1;
@@ -1534,6 +1537,7 @@ callhome_http(char               *url,
     struct plugin *p;
     int    i;
     int    ret;
+    char  *err = NULL;
     
     clicon_debug(1, "%s", __FUNCTION__);
     if ((ub = cbuf_new()) == NULL){ /* URL */
@@ -1550,6 +1554,8 @@ callhome_http(char               *url,
     if (myaddr && myaddr->sin_port) /* tcp may have port 0 since agent will connect later */
 	cprintf(cb, "\"port\":%hu,", ntohs(myaddr->sin_port));
     cprintf(cb, "\"version\":%u,", GRIDEYE_AGENT_VERSION);
+    if (yangmetrics)
+	cprintf(cb, "\"metrics\":[%s],", yangmetrics);
     if (info)
 	cprintf(cb, "\"info\":\"%s\",", info);
     cprintf(cb, "\"plugins\":[");
@@ -1648,8 +1654,18 @@ callhome_http(char               *url,
 	    *natstate = 0;
 	    goto ok;
 	}
-	else if (json_parse_str(getdata, &xreply) < 0){
+	if (json_parse_str(getdata, &xreply) < 0){
 	    clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
+	    *natstate = 0;
+	    goto ok;
+	}
+	/* If not regular output, it is an error*/
+	if (xpath_first(xreply, "output") == NULL){
+	    if ((x = xpath_first(xreply, "//error-message")) != NULL)
+		err = xml_body(x);
+	    if ((x = xpath_first(xreply, "//error-tag")) != NULL)
+		clicon_log(LOG_WARNING,  "%s: error: %s: %s", __FUNCTION__, xml_body(x), err?err:"");
+	    *natstate = 0;
 	    goto ok;
 	}
 	*natstate = 2;
@@ -1708,6 +1724,7 @@ http_data(char               *url,
     int     ret;
     char   *xbody;
     char   *reason = NULL;
+    char   *err = NULL;
 
     clicon_debug(1, "%s", __FUNCTION__);
     *interval = 10000; /* 10s default, on error can be 0 */
@@ -1765,11 +1782,18 @@ http_data(char               *url,
 	*natstate = 0;
 	goto ok;
     }
-    else {
-	if (json_parse_str(getdata, &xreply) < 0){
-	    clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
-	    goto ok;
-	}
+    if (json_parse_str(getdata, &xreply) < 0){
+	clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
+	goto ok;
+    }
+    /* If not regular output, it is an error*/
+    if (xpath_first(xreply, "output") == NULL){
+	if ((x = xpath_first(xreply, "//error-message")) != NULL)
+	    err = xml_body(x);
+	if ((x = xpath_first(xreply, "//error-tag")) != NULL)
+	    clicon_log(LOG_WARNING,  "%s: error: %s: %s", __FUNCTION__, xml_body(x), err?err:"");
+	*natstate = 0;
+	goto ok;
     }
     if ((x = xpath_first(xreply, "//interval")) != NULL){
 	xbody = xml_body(x);
@@ -2043,7 +2067,8 @@ callhome(int                 s,
 	 struct sockaddr_in *myaddr,
 	 char               *eid64str,
 	 char               *info,
-	 int                 curl_timeout
+	 int                 curl_timeout,
+	 const char         *yangmetrics
 	 )
 {
     int            retval = -1;
@@ -2057,6 +2082,7 @@ callhome(int                 s,
 			  myaddr,
 			  info,
 			  curl_timeout,
+			  yangmetrics,
 			  natstate) < 0)
 	    goto done;
     }
@@ -2182,12 +2208,14 @@ main(int   argc,
     int                ok;
     char               pidfile[MAXPATHLEN];
     cxobj             *xtest = NULL;
-    int                interval = 1000;
+    int                interval = 10000;
     int                ctvalid = 0; /* If ct0 and ct1 are valid */
     struct timeval     ct0;
     struct timeval     ct1;
     uint64_t           sseq = 0;
     int                curl_timeout = CURL_TIMEOUT_DEFAULT;
+    char              *yangmetrics=NULL;
+    char              *yangmetric;
 
     /* Initialization */
     argv0 = argv[0];
@@ -2370,11 +2398,33 @@ main(int   argc,
     if (plugin_load_dir(plugin_dir, &plugins) < 0)
 	goto done;
     /*
-     * Iterate through plugins and call setopt functions
+     * Iterate through plugins and call getopt/setopt functions
+     * See options definitions in plugin/grideye_plugin.h
      */
     for (p = plugins; (api=p->p_api)!=NULL; p++){
+	if (api->gp_getopt_fn){
+	    yangmetric = NULL;
+	    if (api->gp_getopt_fn("yangmetric", &yangmetric) < 0){
+		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
+		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+			   p->p_name, strerror(errno));
+	    }
+	    if (yangmetric){
+		size_t len0 = yangmetrics?strlen(yangmetrics):0;
+		size_t newlen = len0 + strlen(yangmetric)+1;
+		if ((yangmetrics = (char*)realloc(yangmetrics, newlen)) == NULL){
+		    clicon_err(OE_UNIX, errno, "realloc");
+		    goto done;
+		}
+		if (snprintf(yangmetrics+len0, newlen, "%s", yangmetric) < 0){
+		    clicon_err(OE_UNIX, errno, "snprintf");
+		    goto done;
+		}
+		free(yangmetric);
+		yangmetric = NULL;
+	    }
+	}
 	if (api->gp_setopt_fn){
-	    /* XXX rewrite these file/device setopts */
 	    if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
 				 DISKIO_WRITEFILE)) <= 0)
 		goto done;
@@ -2475,7 +2525,8 @@ main(int   argc,
 		     &myaddr,
 		     eid64str,
 		     info,
-		     curl_timeout) < 0)
+		     curl_timeout,
+		     yangmetrics) < 0)
 	    goto done;
 	break;
     case GRIDEYE_PROTO_HTTP:
@@ -2487,6 +2538,7 @@ main(int   argc,
 			      NULL,
 			      info,
 			      curl_timeout,
+			      yangmetrics,
 			      &natstate) < 0)
 		goto done;
 	if ((xtest = xml_new("new", NULL, NULL)) == NULL)
@@ -2551,7 +2603,8 @@ main(int   argc,
 			     &myaddr,
 			     eid64str,
 			     info,
-			     curl_timeout) < 0)
+			     curl_timeout,
+			     yangmetrics) < 0)
 		    goto done;
 		tv.tv_sec = callhome_timeout;
 	    }
@@ -2578,7 +2631,7 @@ main(int   argc,
 	    {
 		cbuf *cb;
 		if (natstate != 2){
-		    interval = 100;
+		    interval = 10000;
 		    if (callhome_http(callhome_url,
 				      hostname,
 				      userid,
@@ -2586,6 +2639,7 @@ main(int   argc,
 				      NULL,
 				      info,
 				      curl_timeout,
+				      yangmetrics,
 				      &natstate) < 0)
 			goto done;
 		}
@@ -2629,6 +2683,8 @@ main(int   argc,
     } /* for */
     retval = 0;
  done:
+    if (yangmetrics)
+	free(yangmetrics);
     if (xtest)
 	xml_free(xtest);
     if (s != -1)

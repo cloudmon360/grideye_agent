@@ -46,6 +46,7 @@ static const struct grideye_plugin_api api = {
     "diskio_read",    /* plugin name */
     "str",            /* input format */
     "xml",            /* output format */
+    NULL,
     diskio_read_setopt,
     diskio_read_test, /* actual test */
     diskio_read_exit

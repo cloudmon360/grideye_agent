@@ -39,6 +39,7 @@ static const struct grideye_plugin_api api = {
     "wlan",
     NULL,            /* input format */
     "xml",            /* output format */
+    NULL,
     wlan_setopt,
     wlan_test,
     wlan_exit

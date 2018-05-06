@@ -24,7 +24,8 @@
 #define BUF_MAX 1024
 
 /* Forward */
-int  sysinfo_test(char *instr, char **outstr);
+int sysinfo_test(char *instr, char **outstr);
+int sysinfo_getopt(const char *optname, char **value);
 
 /*
  * This is the API declaration
@@ -33,12 +34,29 @@ static const struct grideye_plugin_api api = {
     2,
     GRIDEYE_PLUGIN_MAGIC,
     "sysinfo",
-    NULL,         /* input format */
+    NULL,          /* input format */
     "xml",         /* output format */
+    sysinfo_getopt,/* getopt yangmetrics */
     NULL,
     sysinfo_test,  /* actual test */
     NULL
 };
+
+/*! Get extra yang metrics (not in main grideye yang file). 
+ * Called when agent starts
+ * @param[in]  optname "yangmetric", if not ignore
+ * @param[out] value   Yang metric definition. Malloced. 
+ */
+int
+sysinfo_getopt(const char *optname, 
+	       char      **value)
+{
+    if (strcmp(optname, "yangmetric"))
+	return 0;
+    if ((*value = strdup("{\"name\":\"loadcore\",\"description\":\"CPU core load\", \"type\":\"decimal64\",\"units\":\"percent\"}")) == NULL)
+	return -1;
+    return 0;
+}
 
 /*
  * Get the CPU we're executing on

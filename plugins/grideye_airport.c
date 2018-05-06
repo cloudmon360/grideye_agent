@@ -56,6 +56,7 @@ static const struct grideye_plugin_api api = {
     NULL,            /* input format */
     "xml",            /* output format */
     NULL,
+    NULL,
     airport_test,
     airport_exit
 };

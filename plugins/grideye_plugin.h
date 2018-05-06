@@ -46,9 +46,16 @@ typedef void * (grideye_plugin_init_t)(int version);
 typedef int (grideye_plugin_exit_t)(void);
 
 /*
- * The options defined in v2 are:
- * largefile, writefile, device
+ * The following options for setopt are defined in v2:
+ * largefile  - Provide a name of an existing very large file
+ * writefile, - Provide a name of a writable file.
+ * device     - wlan wifi device name
+ * yangmetric - provide additional yang metrics defintion for test metrics in
+ *              this plugin
  */
+/* Type of plugin generic getopt function: value is malloced */
+typedef int (grideye_plugin_getopt_t)(const char *optname, char **value);
+
 /* Type of plugin generic setopt function */
 typedef int (grideye_plugin_setopt_t)(const char *optname, char *value);
 
@@ -67,6 +74,8 @@ struct grideye_plugin_api{
     /* test input and output format: xml, csv, json */
     char                  *gp_input_format;
     char                  *gp_output_format; 
+    /* Generic getopt function */
+    grideye_plugin_getopt_t *gp_getopt_fn;
     /* Generic setopt function */
     grideye_plugin_setopt_t *gp_setopt_fn;
     /* Test function with xml|json input and output */

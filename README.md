@@ -92,7 +92,8 @@ gp_magic | Variable | Yes | Must be 0x3f687f03
 gp_name | Variable | Yes | Name of plugin
 gp_input_formar | Variable | No | Test input parameter format
 gp_output_formar | Variable | No | Test output parameter format
-gp_setopt_fn | Function | No | File and device settings
+gp_getopt_fn | Function | No | Generic function for getting plugin info
+gp_setopt_fn | Function | No | Generic function for setting plugin info
 gp_test_fn | Function | Yes | The actual test function with input and output parameters.
 gp_exit_fn | Function | No | An exit function
 
@@ -265,6 +266,7 @@ A very simple Python plugin can look like this:
 			"pytest",		# Plugin name
 			"str",			# Input format
 			"xml",			# Output format
+			None,			# Getopt function
 			None,			# Setopt function
 			"pytest",		# Test function
 			None			# Exit function

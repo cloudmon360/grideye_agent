@@ -30,6 +30,7 @@ static const struct grideye_plugin_api api = {
     "str",           /* input format */
     "xml",           /* output format */
     NULL,
+    NULL,
     dhrystones_test, /* actual test */
     NULL
 };
