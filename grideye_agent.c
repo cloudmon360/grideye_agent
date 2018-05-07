@@ -80,7 +80,7 @@ extern const char GRIDEYE_VERSION[];
 /* Protocol agent version. Bundle with plugin API version
  * I.e. one agent version supports one plugin version
  * But one controller must support multiple agent versions
- * 
+ *
  * Version 2:
  *   New more capable test and plugin protocol
  * Version 3:
@@ -209,6 +209,7 @@ plugin_find(char *name)
     for (p = plugins; p&&p->p_api!=NULL; p++)
 	if (strcmp(p->p_name, name) == 0)
 	    return p;
+
     return NULL;
 }
 
@@ -263,11 +264,11 @@ fail:
  *!
  */
 static char
-*grideye_call_testmethod(char *name,
-			 char *testfunc,
-			 char *argstr)
+*grideye_call_method(char *name,
+		     char *method,
+		     char *argstr)
 {
-    PyObject *pyfunc;
+    PyObject *pymethod;
     PyObject *pyargs;
     PyObject *pyvalue;
     PyObject *pyretval;
@@ -289,14 +290,17 @@ static char
 			      "sys.path.append(\"%s\")",
 			      plugin_dir)) <= 0)
 	goto fail;
+
     if ((modulename = calloc(modulelen + 1, sizeof(char))) == NULL) {
 	clicon_err(OE_UNIX, errno, "calloc");
 	goto fail;
     }
+
     if ((syscmd = calloc(syscmdlen + 1, sizeof(char))) == NULL) {
 	clicon_err(OE_UNIX, errno, "calloc");
 	goto fail;
     }
+
     if (snprintf(modulename, modulelen + 1, "grideye_%s", name) <= 0)
 	goto fail;
 
@@ -319,16 +323,16 @@ static char
     Py_DECREF(pyname);
 
     if (pymodule == NULL) {
-	clicon_log(LOG_ERR, "Failed to load Python module %s", modulename);
+	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, method);
 	goto fail;
     }
 
     if (modulename)
 	free(modulename);
 
-    pyfunc = PyObject_GetAttrString(pymodule, testfunc);
-    if (!pyfunc || !PyCallable_Check(pyfunc)) {
-	clicon_log(LOG_ERR, "Function %s is not callable", PLUGIN_INIT_FN);
+    pymethod = PyObject_GetAttrString(pymodule, method);
+    if (!pymethod || !PyCallable_Check(pymethod)) {
+	clicon_log(LOG_ERR, "Method %s is not callable", PLUGIN_INIT_FN);
 	goto fail;
     }
 
@@ -341,12 +345,12 @@ static char
 
     Py_DECREF(pyvalue);
 
-    if ((pyretval = PyObject_CallObject(pyfunc, pyargs)) == NULL) {
+    if ((pyretval = PyObject_CallObject(pymethod, pyargs)) == NULL) {
 	goto fail;
     }
 
     Py_DECREF(pyargs);
-    Py_DECREF(pyfunc);
+    Py_DECREF(pymethod);
 
     if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 1) {
 	goto fail;
@@ -356,9 +360,13 @@ static char
 
     Py_DECREF(pyretval);
 
+    Py_Finalize();
+
     return outstr;
 
 fail:
+    Py_Finalize();
+
     return NULL;
 }
 
@@ -422,13 +430,13 @@ grideye_plugin_load_py(void *handle,
 
     pyname = PyUnicode_DecodeFSDefault(modulename);
 
-    if (modulename)
-	free(modulename);
-
     if ((pymodule = PyImport_Import(pyname)) == NULL) {
-	clicon_log(LOG_ERR, "Failed to load Python module %s", name);
+	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, PLUGIN_INIT_FN);
 	goto fail;
     }
+
+    if (modulename)
+	free(modulename);
 
     Py_DECREF(pyname);
 
@@ -454,8 +462,9 @@ grideye_plugin_load_py(void *handle,
 
     Py_DECREF(pyargs);
 
-    if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 8)
+    if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 9) {
 		goto fail;
+    }
 
     if ((gp_version = grideye_pyobj_to_long(PyList_GetItem(pyretval, 0)))
 	!= GRIDEYE_PLUGIN_VERSION) {
@@ -478,9 +487,15 @@ grideye_plugin_load_py(void *handle,
 
     api->gp_version = gp_version;
     api->gp_name = grideye_pyobj_to_char(PyList_GetItem(pyretval, 2));
-    api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 6));
-    api->gp_magic = (gp_magic & GRIDEYE_PLUGIN_PYTHON);
+    api->gp_input_format = grideye_pyobj_to_char(PyList_GetItem(pyretval, 3));
     api->gp_output_format = grideye_pyobj_to_char(PyList_GetItem(pyretval, 4));
+    api->gp_getopt_fn = (grideye_plugin_getopt_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 5));
+    api->gp_setopt_fn = (grideye_plugin_setopt_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 6));
+    api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 7));
+    api->gp_exit_fn = (grideye_plugin_exit_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 8));
+
+    /* Make it possible to distinguish between regular plugins and py-plugins */
+    api->gp_magic = (gp_magic & GRIDEYE_PLUGIN_PYTHON);
 
     len = plugins_len(*plugins);
     if ((*plugins = realloc(*plugins, (len+2)*sizeof(struct plugin))) == NULL){
@@ -657,11 +672,13 @@ plugin_load_dir(char          *dir,
        } else if (strcmp(".py", name + off_py) == 0) {
 	   /* Python plugin */
 	   if (grideye_plugin_load_py(handle, name, filename, plugins) < 0) {
-	       clicon_log(LOG_NOTICE, "grideye_plugin_load_py failed");
+	       clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s",
+			  basename(filename));
 	       free(filename);
 	       goto done;
 	   } else {
-	       clicon_log(LOG_NOTICE, "grideye_plugin_load_py was successful");
+	       clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Loading %s",
+			  basename(filename));
 	   }
        }
 
@@ -1085,9 +1102,9 @@ echo_application(struct sender *snd,
 			   __FUNCTION__, p->p_name, argstr?argstr:"");
 
 		if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
-		    if ((str = grideye_call_testmethod(api->gp_name,
-						       (char *)api->gp_test_fn,
-						       argstr)) == NULL)
+		    if ((str = grideye_call_method(api->gp_name,
+						   (char *)api->gp_test_fn,
+						   argstr)) == NULL)
 			continue;
 		    clicon_log(LOG_NOTICE, "Returned %s", str);
 		} else {
@@ -1194,11 +1211,12 @@ echo_application_xml(cxobj         *xt,
 	    argstr = xml_body(x);
 
 	if (api->gp_test_fn != NULL) {
+
 	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
-		    if ((str = grideye_call_testmethod(api->gp_name,
-						       (char *)api->gp_test_fn,
-						       argstr)) == NULL)
-			continue;
+		if ((str = grideye_call_method(api->gp_name,
+					       (char *)api->gp_test_fn,
+					       argstr)) == NULL)
+		    continue;
 	    } else {
 		if ((pret = api->gp_test_fn(argstr, &str)) < 0) {
 		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
@@ -1538,7 +1556,7 @@ callhome_http(char               *url,
     int    i;
     int    ret;
     char  *err = NULL;
-    
+
     clicon_debug(1, "%s", __FUNCTION__);
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
@@ -1819,7 +1837,7 @@ http_data(char               *url,
     if ((x = xpath_first(xreply, "//t0")) != NULL){
 	xbody = xml_body(x);
 	if (parse_dec64(xbody, 6, &i64, &reason) < 0){
-	    clicon_err(OE_XML, errno, "parse_dec64: %s", xbody);	    
+	    clicon_err(OE_XML, errno, "parse_dec64: %s", xbody);
 	    goto done;
 	}
 	if (reason){
@@ -2418,13 +2436,25 @@ main(int   argc,
      * See options definitions in plugin/grideye_plugin.h
      */
     for (p = plugins; (api=p->p_api)!=NULL; p++){
-	if (api->gp_getopt_fn){
+	if (api->gp_getopt_fn) {
 	    yangmetric = NULL;
-	    if (api->gp_getopt_fn("yangmetric", &yangmetric) < 0){
-		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
-		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
-			   p->p_name, strerror(errno));
+
+	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
+		if ((yangmetric = grideye_call_method(api->gp_name,
+						      (char *)api->gp_getopt_fn,
+						      "yangmetric")) == NULL) {
+		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+			       p->p_name, strerror(errno));
+		}
+	    } else {
+		if (api->gp_getopt_fn("yangmetric", &yangmetric) < 0){
+		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+			       p->p_name, strerror(errno));
+		}
 	    }
+
 	    if (yangmetric){
 		if ((api->gp_input_format==NULL && 
 		     strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "json")==0)||
@@ -2442,6 +2472,7 @@ main(int   argc,
 		yangmetric = NULL;
 	    }
 	}
+
 	if (api->gp_setopt_fn){
 	    if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
 				 DISKIO_WRITEFILE)) <= 0)
