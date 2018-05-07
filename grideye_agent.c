@@ -1099,13 +1099,10 @@ echo_application(struct sender *snd,
 		}
 
 		if (str){
-		    if (strcmp(api->gp_output_format, "json")==0){
+		    if ((api->gp_output_format==NULL && 
+			 strcmp(GRIDEYE_PLUGIN_OUTPUT_FORMAT, "json")==0)||
+			strcmp(api->gp_output_format, "json")==0){
 			cxobj *xt= NULL;
-			cbuf *cbj;
-			if ((cbj = cbuf_new())==NULL){
-			    clicon_err(OE_UNIX, errno, "cbuf_new");
-			    goto done;
-			}
 			if (json_parse_str(str, &xt) < 0)
 			    goto done;
 			xml_rootchild(xt,0,&xt);
@@ -1113,8 +1110,17 @@ echo_application(struct sender *snd,
 			    goto done;
 			xml_free(xt);
 		    }
-		    else
-			cprintf(cb, "%s", str); /* XML */
+		    else if ((api->gp_output_format==NULL && strcmp(GRIDEYE_PLUGIN_OUTPUT_FORMAT, "xml")==0)||
+			strcmp(api->gp_output_format, "xml")==0){
+			if (xml_parse_string(str, NULL, &xt) < 0)
+			    goto done;
+			cprintf(cb, "%s", str);
+			xml_free(xt);
+		    }
+		    else{
+			clicon_err(OE_PLUGIN, 0, "Inavlid output format %s (%s)", api->gp_output_format, GRIDEYE_PLUGIN_OUTPUT_FORMAT);
+			goto done;
+		    }
 		    free(str);
 		    str = NULL;
 		}
@@ -1200,15 +1206,9 @@ echo_application_xml(cxobj         *xt,
 		    continue;
 		}
 	    }
-
 	    if (str) {
 		if (strcmp(api->gp_output_format, "json")==0){
 		    cxobj *xt= NULL;
-		    cbuf *cbj;
-		    if ((cbj = cbuf_new())==NULL){
-			clicon_err(OE_UNIX, errno, "cbuf_new");
-			goto done;
-		    }
 		    if (json_parse_str(str, &xt) < 0)
 			goto done;
 		    xml_rootchild(xt,0,&xt);
@@ -1506,7 +1506,7 @@ echo_packet(int            s,
  * @param[in]  myaddr        Address, port of locally bound socket
  * @param[in]  info          Info about this node/agent
  * @param[in]  curl_timeout  Curl post request timeout in seconds
- * @param[in]  yang_metrics  New yang metrics required for this agent
+ * @param[in]  xym           yang metrics required for this agent
  * @param[in,out] natstate   0:none 1:enabled 2:addr&port defined 3: connected
  * @see nattraversal_udp
  * XXX: problem with using curl primary_ip in registering server. Eg curl localhost can resolve to
@@ -1520,7 +1520,7 @@ callhome_http(char               *url,
 	      struct sockaddr_in *myaddr,
 	      char               *info,
 	      int                 curl_timeout,
-	      const char         *yangmetrics,
+	      cxobj              *xym,
 	      int                *natstate)
 {
     int    retval = -1;
@@ -1554,8 +1554,21 @@ callhome_http(char               *url,
     if (myaddr && myaddr->sin_port) /* tcp may have port 0 since agent will connect later */
 	cprintf(cb, "\"port\":%hu,", ntohs(myaddr->sin_port));
     cprintf(cb, "\"version\":%u,", GRIDEYE_AGENT_VERSION);
-    if (yangmetrics)
-	cprintf(cb, "\"metrics\":[%s],", yangmetrics);
+#if 1
+    if (xym){
+	cbuf *cbtmp;
+	char *str;
+	if ((cbtmp=cbuf_new()) == NULL)
+	    goto done;
+	if (xml2json_cbuf_vec(cbtmp, xml_childvec_get(xym),xml_child_nr(xym), 0) < 0)
+	    goto done;
+	str = cbuf_get(cbtmp);
+	str++;
+	str[strlen(str)-1] = '\0';
+	cprintf(cb, "%s,", str);
+	cbuf_free(cbtmp);
+    }
+#endif
     if (info)
 	cprintf(cb, "\"info\":\"%s\",", info);
     cprintf(cb, "\"plugins\":[");
@@ -2057,6 +2070,9 @@ doexit(int arg)
     exit(0);
 }
 
+/*!
+ * @param[in]  xym           yang metrics required for this agent
+ */
 static int
 callhome(int                 s,
 	 char               *callhome_url,
@@ -2068,7 +2084,7 @@ callhome(int                 s,
 	 char               *eid64str,
 	 char               *info,
 	 int                 curl_timeout,
-	 const char         *yangmetrics
+	 cxobj              *xym
 	 )
 {
     int            retval = -1;
@@ -2082,7 +2098,7 @@ callhome(int                 s,
 			  myaddr,
 			  info,
 			  curl_timeout,
-			  yangmetrics,
+			  xym,
 			  natstate) < 0)
 	    goto done;
     }
@@ -2214,7 +2230,7 @@ main(int   argc,
     struct timeval     ct1;
     uint64_t           sseq = 0;
     int                curl_timeout = CURL_TIMEOUT_DEFAULT;
-    char              *yangmetrics=NULL;
+    cxobj             *xym=NULL; /* XML yang metric tree */
     char              *yangmetric;
 
     /* Initialization */
@@ -2410,15 +2426,17 @@ main(int   argc,
 			   p->p_name, strerror(errno));
 	    }
 	    if (yangmetric){
-		size_t len0 = yangmetrics?strlen(yangmetrics):0;
-		size_t newlen = len0 + strlen(yangmetric)+1;
-		if ((yangmetrics = (char*)realloc(yangmetrics, newlen)) == NULL){
-		    clicon_err(OE_UNIX, errno, "realloc");
-		    goto done;
+		if ((api->gp_input_format==NULL && 
+		     strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "json")==0)||
+		    strcmp(api->gp_input_format, "json")==0){
+		    if (json_parse_str(yangmetric, &xym) < 0)
+			goto done;		    
 		}
-		if (snprintf(yangmetrics+len0, newlen, "%s", yangmetric) < 0){
-		    clicon_err(OE_UNIX, errno, "snprintf");
-		    goto done;
+		else if ((api->gp_input_format==NULL && 
+			  strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "xml")==0)||
+			strcmp(api->gp_input_format, "xml")==0){
+		    if (xml_parse_string(yangmetric, NULL, &xym) < 0)
+			goto done;
 		}
 		free(yangmetric);
 		yangmetric = NULL;
@@ -2463,6 +2481,7 @@ main(int   argc,
 	    }
 	}
     }
+    /* Write XML yang metrics tree as JSON */
     if (0)
 	fprintf(stderr, "%s %s\n", diskio_largefile, diskio_writefile);
     /* Log file */
@@ -2526,7 +2545,7 @@ main(int   argc,
 		     eid64str,
 		     info,
 		     curl_timeout,
-		     yangmetrics) < 0)
+		     xym) < 0)
 	    goto done;
 	break;
     case GRIDEYE_PROTO_HTTP:
@@ -2538,7 +2557,7 @@ main(int   argc,
 			      NULL,
 			      info,
 			      curl_timeout,
-			      yangmetrics,
+			      xym,
 			      &natstate) < 0)
 		goto done;
 	if ((xtest = xml_new("new", NULL, NULL)) == NULL)
@@ -2604,7 +2623,7 @@ main(int   argc,
 			     eid64str,
 			     info,
 			     curl_timeout,
-			     yangmetrics) < 0)
+			     xym) < 0)
 		    goto done;
 		tv.tv_sec = callhome_timeout;
 	    }
@@ -2639,7 +2658,7 @@ main(int   argc,
 				      NULL,
 				      info,
 				      curl_timeout,
-				      yangmetrics,
+				      xym,
 				      &natstate) < 0)
 			goto done;
 		}
@@ -2683,8 +2702,8 @@ main(int   argc,
     } /* for */
     retval = 0;
  done:
-    if (yangmetrics)
-	free(yangmetrics);
+    if (xym) /* json yang metric string*/
+	xml_free(xym);
     if (xtest)
 	xml_free(xtest);
     if (s != -1)

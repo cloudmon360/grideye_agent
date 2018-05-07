@@ -34,7 +34,7 @@ static const struct grideye_plugin_api api = {
     2,
     GRIDEYE_PLUGIN_MAGIC,
     "sysinfo",
-    NULL,          /* input format */
+    "json",        /* input format */
     "xml",         /* output format */
     sysinfo_getopt,/* getopt yangmetrics */
     NULL,
@@ -53,7 +53,7 @@ sysinfo_getopt(const char *optname,
 {
     if (strcmp(optname, "yangmetric"))
 	return 0;
-    if ((*value = strdup("{\"name\":\"loadcore\",\"description\":\"CPU core load\", \"type\":\"decimal64\",\"units\":\"percent\"}")) == NULL)
+    if ((*value = strdup("{\"metrics\":{\"name\":\"loadcore\",\"description\":\"CPU core load\", \"type\":\"decimal64\",\"units\":\"percent\"}}")) == NULL)
 	return -1;
     return 0;
 }
