@@ -282,6 +282,9 @@ static char
     int      modulelen = 0;
     int      syscmdlen = 0;
 
+    if (argstr == NULL)
+	    argstr = "";
+
     if ((modulelen = snprintf(NULL, 0, "grideye_%s", name)) <= 0)
 	goto fail;
 
@@ -360,7 +363,7 @@ static char
 
     Py_DECREF(pyretval);
 
-    Py_Finalize();
+    // Py_Finalize();
 
     return outstr;
 
@@ -2154,7 +2157,7 @@ usage(char *argv0)
 	    "where options are:\n"
 	    "\t-h \t\tHelp text\n"
 	    "\t-D \t\tDebug\n"
-    	    "\t-F \t\tRun in foreground and log to stderr\n"
+	    "\t-F \t\tRun in foreground and log to stderr\n"
 	    "\t-v \t\tPrint version\n"
 	    "\t-q \t\tQuiet\n"
 	    "\t-e <eid64> \tDevice identifier (random if not given)\n"
@@ -2455,19 +2458,24 @@ main(int   argc,
 		}
 	    }
 
-	    if (yangmetric){
-		if ((api->gp_input_format==NULL && 
+	    if (yangmetric) {
+		if ((api->gp_input_format==NULL &&
 		     strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "json")==0)||
 		    strcmp(api->gp_input_format, "json")==0){
-		    if (json_parse_str(yangmetric, &xym) < 0)
-			goto done;		    
+			if (json_parse_str(yangmetric, &xym) < 0) {
+				clicon_log(LOG_NOTICE, "grideye_agent: Could not parse JSON");
+				goto done;
+			}
 		}
-		else if ((api->gp_input_format==NULL && 
+		else if ((api->gp_input_format==NULL &&
 			  strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "xml")==0)||
-			strcmp(api->gp_input_format, "xml")==0){
-		    if (xml_parse_string(yangmetric, NULL, &xym) < 0)
-			goto done;
+			 strcmp(api->gp_input_format, "xml")==0){
+			if (xml_parse_string(yangmetric, NULL, &xym) < 0) {
+				clicon_log(LOG_NOTICE, "grideye_agent: Could not parse JSON");
+				goto done;
+			}
 		}
+
 		free(yangmetric);
 		yangmetric = NULL;
 	    }
