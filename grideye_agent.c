@@ -2466,12 +2466,11 @@ main(int   argc,
 				clicon_log(LOG_NOTICE, "grideye_agent: Could not parse JSON");
 				goto done;
 			}
-		}
-		else if ((api->gp_input_format==NULL &&
-			  strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "xml")==0)||
-			 strcmp(api->gp_input_format, "xml")==0){
+		} else if ((api->gp_input_format==NULL &&
+			    strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "xml")==0)||
+			   strcmp(api->gp_input_format, "xml")==0){
 			if (xml_parse_string(yangmetric, NULL, &xym) < 0) {
-				clicon_log(LOG_NOTICE, "grideye_agent: Could not parse JSON");
+				clicon_log(LOG_NOTICE, "grideye_agent: Could not parse XML");
 				goto done;
 			}
 		}
