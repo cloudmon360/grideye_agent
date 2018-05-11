@@ -80,7 +80,7 @@ extern const char GRIDEYE_VERSION[];
 /* Protocol agent version. Bundle with plugin API version
  * I.e. one agent version supports one plugin version
  * But one controller must support multiple agent versions
- * 
+ *
  * Version 2:
  *   New more capable test and plugin protocol
  * Version 3:
@@ -209,6 +209,7 @@ plugin_find(char *name)
     for (p = plugins; p&&p->p_api!=NULL; p++)
 	if (strcmp(p->p_name, name) == 0)
 	    return p;
+
     return NULL;
 }
 
@@ -263,11 +264,11 @@ fail:
  *!
  */
 static char
-*grideye_call_testmethod(char *name,
-			 char *testfunc,
-			 char *argstr)
+*grideye_call_method(char *name,
+		     char *method,
+		     char *argstr)
 {
-    PyObject *pyfunc;
+    PyObject *pymethod;
     PyObject *pyargs;
     PyObject *pyvalue;
     PyObject *pyretval;
@@ -281,6 +282,9 @@ static char
     int      modulelen = 0;
     int      syscmdlen = 0;
 
+    if (argstr == NULL)
+	    argstr = "";
+
     if ((modulelen = snprintf(NULL, 0, "grideye_%s", name)) <= 0)
 	goto fail;
 
@@ -289,14 +293,17 @@ static char
 			      "sys.path.append(\"%s\")",
 			      plugin_dir)) <= 0)
 	goto fail;
+
     if ((modulename = calloc(modulelen + 1, sizeof(char))) == NULL) {
 	clicon_err(OE_UNIX, errno, "calloc");
 	goto fail;
     }
+
     if ((syscmd = calloc(syscmdlen + 1, sizeof(char))) == NULL) {
 	clicon_err(OE_UNIX, errno, "calloc");
 	goto fail;
     }
+
     if (snprintf(modulename, modulelen + 1, "grideye_%s", name) <= 0)
 	goto fail;
 
@@ -319,16 +326,16 @@ static char
     Py_DECREF(pyname);
 
     if (pymodule == NULL) {
-	clicon_log(LOG_ERR, "Failed to load Python module %s", modulename);
+	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, method);
 	goto fail;
     }
 
     if (modulename)
 	free(modulename);
 
-    pyfunc = PyObject_GetAttrString(pymodule, testfunc);
-    if (!pyfunc || !PyCallable_Check(pyfunc)) {
-	clicon_log(LOG_ERR, "Function %s is not callable", PLUGIN_INIT_FN);
+    pymethod = PyObject_GetAttrString(pymodule, method);
+    if (!pymethod || !PyCallable_Check(pymethod)) {
+	clicon_log(LOG_ERR, "Method %s is not callable", PLUGIN_INIT_FN);
 	goto fail;
     }
 
@@ -341,12 +348,12 @@ static char
 
     Py_DECREF(pyvalue);
 
-    if ((pyretval = PyObject_CallObject(pyfunc, pyargs)) == NULL) {
+    if ((pyretval = PyObject_CallObject(pymethod, pyargs)) == NULL) {
 	goto fail;
     }
 
     Py_DECREF(pyargs);
-    Py_DECREF(pyfunc);
+    Py_DECREF(pymethod);
 
     if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 1) {
 	goto fail;
@@ -356,9 +363,13 @@ static char
 
     Py_DECREF(pyretval);
 
+    // Py_Finalize();
+
     return outstr;
 
 fail:
+    Py_Finalize();
+
     return NULL;
 }
 
@@ -422,13 +433,13 @@ grideye_plugin_load_py(void *handle,
 
     pyname = PyUnicode_DecodeFSDefault(modulename);
 
-    if (modulename)
-	free(modulename);
-
     if ((pymodule = PyImport_Import(pyname)) == NULL) {
-	clicon_log(LOG_ERR, "Failed to load Python module %s", name);
+	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, PLUGIN_INIT_FN);
 	goto fail;
     }
+
+    if (modulename)
+	free(modulename);
 
     Py_DECREF(pyname);
 
@@ -454,8 +465,9 @@ grideye_plugin_load_py(void *handle,
 
     Py_DECREF(pyargs);
 
-    if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 8)
+    if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 9) {
 		goto fail;
+    }
 
     if ((gp_version = grideye_pyobj_to_long(PyList_GetItem(pyretval, 0)))
 	!= GRIDEYE_PLUGIN_VERSION) {
@@ -478,9 +490,15 @@ grideye_plugin_load_py(void *handle,
 
     api->gp_version = gp_version;
     api->gp_name = grideye_pyobj_to_char(PyList_GetItem(pyretval, 2));
-    api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 6));
-    api->gp_magic = (gp_magic & GRIDEYE_PLUGIN_PYTHON);
+    api->gp_input_format = grideye_pyobj_to_char(PyList_GetItem(pyretval, 3));
     api->gp_output_format = grideye_pyobj_to_char(PyList_GetItem(pyretval, 4));
+    api->gp_getopt_fn = (grideye_plugin_getopt_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 5));
+    api->gp_setopt_fn = (grideye_plugin_setopt_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 6));
+    api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 7));
+    api->gp_exit_fn = (grideye_plugin_exit_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 8));
+
+    /* Make it possible to distinguish between regular plugins and py-plugins */
+    api->gp_magic = (gp_magic & GRIDEYE_PLUGIN_PYTHON);
 
     len = plugins_len(*plugins);
     if ((*plugins = realloc(*plugins, (len+2)*sizeof(struct plugin))) == NULL){
@@ -657,11 +675,13 @@ plugin_load_dir(char          *dir,
        } else if (strcmp(".py", name + off_py) == 0) {
 	   /* Python plugin */
 	   if (grideye_plugin_load_py(handle, name, filename, plugins) < 0) {
-	       clicon_log(LOG_NOTICE, "grideye_plugin_load_py failed");
+	       clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s",
+			  basename(filename));
 	       free(filename);
 	       goto done;
 	   } else {
-	       clicon_log(LOG_NOTICE, "grideye_plugin_load_py was successful");
+	       clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Loading %s",
+			  basename(filename));
 	   }
        }
 
@@ -1085,9 +1105,9 @@ echo_application(struct sender *snd,
 			   __FUNCTION__, p->p_name, argstr?argstr:"");
 
 		if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
-		    if ((str = grideye_call_testmethod(api->gp_name,
-						       (char *)api->gp_test_fn,
-						       argstr)) == NULL)
+		    if ((str = grideye_call_method(api->gp_name,
+						   (char *)api->gp_test_fn,
+						   argstr)) == NULL)
 			continue;
 		    clicon_log(LOG_NOTICE, "Returned %s", str);
 		} else {
@@ -1099,13 +1119,10 @@ echo_application(struct sender *snd,
 		}
 
 		if (str){
-		    if (strcmp(api->gp_output_format, "json")==0){
+		    if ((api->gp_output_format==NULL && 
+			 strcmp(GRIDEYE_PLUGIN_OUTPUT_FORMAT, "json")==0)||
+			strcmp(api->gp_output_format, "json")==0){
 			cxobj *xt= NULL;
-			cbuf *cbj;
-			if ((cbj = cbuf_new())==NULL){
-			    clicon_err(OE_UNIX, errno, "cbuf_new");
-			    goto done;
-			}
 			if (json_parse_str(str, &xt) < 0)
 			    goto done;
 			xml_rootchild(xt,0,&xt);
@@ -1113,8 +1130,17 @@ echo_application(struct sender *snd,
 			    goto done;
 			xml_free(xt);
 		    }
-		    else
-			cprintf(cb, "%s", str); /* XML */
+		    else if ((api->gp_output_format==NULL && strcmp(GRIDEYE_PLUGIN_OUTPUT_FORMAT, "xml")==0)||
+			strcmp(api->gp_output_format, "xml")==0){
+			if (xml_parse_string(str, NULL, &xt) < 0)
+			    goto done;
+			cprintf(cb, "%s", str);
+			xml_free(xt);
+		    }
+		    else{
+			clicon_err(OE_PLUGIN, 0, "Inavlid output format %s (%s)", api->gp_output_format, GRIDEYE_PLUGIN_OUTPUT_FORMAT);
+			goto done;
+		    }
 		    free(str);
 		    str = NULL;
 		}
@@ -1188,11 +1214,12 @@ echo_application_xml(cxobj         *xt,
 	    argstr = xml_body(x);
 
 	if (api->gp_test_fn != NULL) {
+
 	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
-		    if ((str = grideye_call_testmethod(api->gp_name,
-						       (char *)api->gp_test_fn,
-						       argstr)) == NULL)
-			continue;
+		if ((str = grideye_call_method(api->gp_name,
+					       (char *)api->gp_test_fn,
+					       argstr)) == NULL)
+		    continue;
 	    } else {
 		if ((pret = api->gp_test_fn(argstr, &str)) < 0) {
 		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
@@ -1200,15 +1227,9 @@ echo_application_xml(cxobj         *xt,
 		    continue;
 		}
 	    }
-
 	    if (str) {
 		if (strcmp(api->gp_output_format, "json")==0){
 		    cxobj *xt= NULL;
-		    cbuf *cbj;
-		    if ((cbj = cbuf_new())==NULL){
-			clicon_err(OE_UNIX, errno, "cbuf_new");
-			goto done;
-		    }
 		    if (json_parse_str(str, &xt) < 0)
 			goto done;
 		    xml_rootchild(xt,0,&xt);
@@ -1506,7 +1527,7 @@ echo_packet(int            s,
  * @param[in]  myaddr        Address, port of locally bound socket
  * @param[in]  info          Info about this node/agent
  * @param[in]  curl_timeout  Curl post request timeout in seconds
- * @param[in]  yang_metrics  New yang metrics required for this agent
+ * @param[in]  xym           yang metrics required for this agent
  * @param[in,out] natstate   0:none 1:enabled 2:addr&port defined 3: connected
  * @see nattraversal_udp
  * XXX: problem with using curl primary_ip in registering server. Eg curl localhost can resolve to
@@ -1520,7 +1541,7 @@ callhome_http(char               *url,
 	      struct sockaddr_in *myaddr,
 	      char               *info,
 	      int                 curl_timeout,
-	      const char         *yangmetrics,
+	      cxobj              *xym,
 	      int                *natstate)
 {
     int    retval = -1;
@@ -1538,7 +1559,7 @@ callhome_http(char               *url,
     int    i;
     int    ret;
     char  *err = NULL;
-    
+
     clicon_debug(1, "%s", __FUNCTION__);
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
@@ -1554,8 +1575,21 @@ callhome_http(char               *url,
     if (myaddr && myaddr->sin_port) /* tcp may have port 0 since agent will connect later */
 	cprintf(cb, "\"port\":%hu,", ntohs(myaddr->sin_port));
     cprintf(cb, "\"version\":%u,", GRIDEYE_AGENT_VERSION);
-    if (yangmetrics)
-	cprintf(cb, "\"metrics\":[%s],", yangmetrics);
+#if 1
+    if (xym){
+	cbuf *cbtmp;
+	char *str;
+	if ((cbtmp=cbuf_new()) == NULL)
+	    goto done;
+	if (xml2json_cbuf_vec(cbtmp, xml_childvec_get(xym),xml_child_nr(xym), 0) < 0)
+	    goto done;
+	str = cbuf_get(cbtmp);
+	str++;
+	str[strlen(str)-1] = '\0';
+	cprintf(cb, "%s,", str);
+	cbuf_free(cbtmp);
+    }
+#endif
     if (info)
 	cprintf(cb, "\"info\":\"%s\",", info);
     cprintf(cb, "\"plugins\":[");
@@ -1814,7 +1848,7 @@ http_data(char               *url,
 	    goto ok;
 	}
 	if (parse_dec64(xbody, 6, &i64, &reason) < 0){
-	    clicon_err(OE_XML, errno, "parse_dec64: %s", xbody);	    
+	    clicon_err(OE_XML, errno, "parse_dec64: %s", xbody);
 	    goto done;
 	}
 	if (reason){
@@ -2065,6 +2099,9 @@ doexit(int arg)
     exit(0);
 }
 
+/*!
+ * @param[in]  xym           yang metrics required for this agent
+ */
 static int
 callhome(int                 s,
 	 char               *callhome_url,
@@ -2076,7 +2113,7 @@ callhome(int                 s,
 	 char               *eid64str,
 	 char               *info,
 	 int                 curl_timeout,
-	 const char         *yangmetrics
+	 cxobj              *xym
 	 )
 {
     int            retval = -1;
@@ -2090,7 +2127,7 @@ callhome(int                 s,
 			  myaddr,
 			  info,
 			  curl_timeout,
-			  yangmetrics,
+			  xym,
 			  natstate) < 0)
 	    goto done;
     }
@@ -2128,7 +2165,7 @@ usage(char *argv0)
 	    "where options are:\n"
 	    "\t-h \t\tHelp text\n"
 	    "\t-D \t\tDebug\n"
-    	    "\t-F \t\tRun in foreground and log to stderr\n"
+	    "\t-F \t\tRun in foreground and log to stderr\n"
 	    "\t-v \t\tPrint version\n"
 	    "\t-q \t\tQuiet\n"
 	    "\t-e <eid64> \tDevice identifier (random if not given)\n"
@@ -2222,7 +2259,7 @@ main(int   argc,
     struct timeval     ct1;
     uint64_t           sseq = 0;
     int                curl_timeout = CURL_TIMEOUT_DEFAULT;
-    char              *yangmetrics=NULL;
+    cxobj             *xym=NULL; /* XML yang metric tree */
     char              *yangmetric;
 
     /* Initialization */
@@ -2411,28 +2448,47 @@ main(int   argc,
      * See options definitions in plugin/grideye_plugin.h
      */
     for (p = plugins; (api=p->p_api)!=NULL; p++){
-	if (api->gp_getopt_fn){
+	if (api->gp_getopt_fn) {
 	    yangmetric = NULL;
-	    if (api->gp_getopt_fn("yangmetric", &yangmetric) < 0){
-		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
-		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
-			   p->p_name, strerror(errno));
+
+	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
+		if ((yangmetric = grideye_call_method(api->gp_name,
+						      (char *)api->gp_getopt_fn,
+						      "yangmetric")) == NULL) {
+		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+			       p->p_name, strerror(errno));
+		}
+	    } else {
+		if (api->gp_getopt_fn("yangmetric", &yangmetric) < 0){
+		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+			       p->p_name, strerror(errno));
+		}
 	    }
-	    if (yangmetric){
-		size_t len0 = yangmetrics?strlen(yangmetrics):0;
-		size_t newlen = len0 + strlen(yangmetric)+1;
-		if ((yangmetrics = (char*)realloc(yangmetrics, newlen)) == NULL){
-		    clicon_err(OE_UNIX, errno, "realloc");
-		    goto done;
+
+	    if (yangmetric) {
+		if ((api->gp_input_format==NULL &&
+		     strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "json")==0)||
+		    strcmp(api->gp_input_format, "json")==0){
+			if (json_parse_str(yangmetric, &xym) < 0) {
+				clicon_log(LOG_NOTICE, "grideye_agent: Could not parse JSON");
+				goto done;
+			}
+		} else if ((api->gp_input_format==NULL &&
+			    strcmp(GRIDEYE_PLUGIN_INPUT_FORMAT, "xml")==0)||
+			   strcmp(api->gp_input_format, "xml")==0){
+			if (xml_parse_string(yangmetric, NULL, &xym) < 0) {
+				clicon_log(LOG_NOTICE, "grideye_agent: Could not parse XML");
+				goto done;
+			}
 		}
-		if (snprintf(yangmetrics+len0, newlen, "%s", yangmetric) < 0){
-		    clicon_err(OE_UNIX, errno, "snprintf");
-		    goto done;
-		}
+
 		free(yangmetric);
 		yangmetric = NULL;
 	    }
 	}
+
 	if (api->gp_setopt_fn){
 	    if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
 				 DISKIO_WRITEFILE)) <= 0)
@@ -2472,6 +2528,7 @@ main(int   argc,
 	    }
 	}
     }
+    /* Write XML yang metrics tree as JSON */
     if (0)
 	fprintf(stderr, "%s %s\n", diskio_largefile, diskio_writefile);
     /* Log file */
@@ -2535,7 +2592,7 @@ main(int   argc,
 		     eid64str,
 		     info,
 		     curl_timeout,
-		     yangmetrics) < 0)
+		     xym) < 0)
 	    goto done;
 	break;
     case GRIDEYE_PROTO_HTTP:
@@ -2547,7 +2604,7 @@ main(int   argc,
 			      NULL,
 			      info,
 			      curl_timeout,
-			      yangmetrics,
+			      xym,
 			      &natstate) < 0)
 		goto done;
 	if ((xtest = xml_new("new", NULL, NULL)) == NULL)
@@ -2613,7 +2670,7 @@ main(int   argc,
 			     eid64str,
 			     info,
 			     curl_timeout,
-			     yangmetrics) < 0)
+			     xym) < 0)
 		    goto done;
 		tv.tv_sec = callhome_timeout;
 	    }
@@ -2654,7 +2711,7 @@ main(int   argc,
 				      NULL,
 				      info,
 				      curl_timeout,
-				      yangmetrics,
+				      xym,
 				      &natstate) < 0)
 			goto done;
 		}
@@ -2698,8 +2755,8 @@ main(int   argc,
     } /* for */
     retval = 0;
  done:
-    if (yangmetrics)
-	free(yangmetrics);
+    if (xym) /* json yang metric string*/
+	xml_free(xym);
     if (xtest)
 	xml_free(xtest);
     if (s != -1)

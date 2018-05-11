@@ -62,6 +62,9 @@ typedef int (grideye_plugin_setopt_t)(const char *optname, char *value);
 /* Type of plugin test function */
 typedef int (grideye_plugin_test_t)(char *instr, char **outstr);
 
+#define GRIDEYE_PLUGIN_INPUT_FORMAT "xml"
+#define GRIDEYE_PLUGIN_OUTPUT_FORMAT "xml"
+
 /* grideye agent plugin init struct for the api 
  * Note: Implicit init function, see PLUGIN_INIT_FN 
  */
