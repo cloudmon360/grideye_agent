@@ -116,7 +116,7 @@ extern const char GRIDEYE_VERSION[];
 /* Run with american fuzzy lop http://lcamtuf.coredump.cx/afl 
  * Only runs with -p http and replaces curl with stdin/stdout
  */
-#undef FUZZ
+#define FUZZ 1
 
 /* By default, this is where grideye_agent looks for plugins
  * This is normally set in configure/Makefile as $exec_prefix/lib/grideye
@@ -1728,6 +1728,10 @@ http_data(char               *url,
 
     clicon_debug(1, "%s", __FUNCTION__);
     *interval = 10000; /* 10s default, on error can be 0 */
+#ifdef FUZZ
+    if (fuzz)
+	*interval = 1;
+#endif
     if ((ub = cbuf_new()) == NULL){ /* URL */
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
@@ -1804,7 +1808,11 @@ http_data(char               *url,
 	*sseq = atoi(xbody);
     }
     if ((x = xpath_first(xreply, "//t0")) != NULL){
-	xbody = xml_body(x);
+	if ((xbody = xml_body(x)) == NULL){
+	    clicon_log(LOG_WARNING,  "%s: No t0 timestamp", __FUNCTION__);
+	    *natstate = 0;
+	    goto ok;
+	}
 	if (parse_dec64(xbody, 6, &i64, &reason) < 0){
 	    clicon_err(OE_XML, errno, "parse_dec64: %s", xbody);	    
 	    goto done;
@@ -2341,6 +2349,7 @@ main(int   argc,
 #ifdef FUZZ
 	case 'Z':    /* Fuzzing simulation */
 	    fuzz++;
+	    interval = 1;
 	    break;
 #endif
 	case 's':    /* SSL verify peer */
@@ -2631,7 +2640,13 @@ main(int   argc,
 	    {
 		cbuf *cb;
 		if (natstate != 2){
+
 		    interval = 10000;
+#ifdef FUZZ
+		    if (fuzz)
+			interval = 1;
+#endif
+
 		    if (callhome_http(callhome_url,
 				      hostname,
 				      userid,
