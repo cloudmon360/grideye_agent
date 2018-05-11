@@ -1726,6 +1726,7 @@ callhome_http(char               *url,
 /*!
  * @param[in]     url       URL - where to send http data to
  * @param[in]     name
+ * @param[in]     cbmetr    Metric data from echo_application_xml
  * @param[in]     timeout   Curl post request timeout in seconds
  * @param[in,out] natstate  0:none 1:enabled 2:addr&port defined 3: connected
  * @param[out]    interval  
@@ -1737,8 +1738,9 @@ http_data(char               *url,
 	  char               *id,
 	  cbuf               *cbmetr,
 	  uint64_t           *sseq,
-	  int                *tvalid,
+	  int                *t0valid,
 	  struct timeval     *t0,
+	  int                *t1valid,
 	  struct timeval     *t1,
 	  int                 curl_timeout,
 	  int                *natstate,
@@ -1778,16 +1780,20 @@ http_data(char               *url,
     cprintf(cb, "<name>%s</name>", name);
     cprintf(cb, "<userid>%s</userid>", id);
     cprintf(cb, "<sseqn>%" PRIu64 "</sseqn>", *sseq);
-    if (cbmetr){
-	cprintf(cb, "<aseqn>%" PRIu64 "</aseqn>", aseq++);
-	if (*tvalid){
-	    cprintf(cb, "<t0>%ld.%06ld</t0>", t0->tv_sec, t0->tv_usec);
-	    cprintf(cb, "<t1>%ld.%06ld</t1>", t1->tv_sec, t1->tv_usec);
-	}
-	gettimeofday(&t2, NULL);
-	cprintf(cb, "<t2>%ld.%06ld</t2>", t2.tv_sec, t2.tv_usec);
-	cprintf(cb, "%s", cbuf_get(cbmetr));
+    cprintf(cb, "<aseqn>%" PRIu64 "</aseqn>", aseq++);
+    if (*t0valid){
+	cprintf(cb, "<t0>%ld.%06ld</t0>", t0->tv_sec, t0->tv_usec);
+	*t0valid = 0;
     }
+    if (*t1valid){
+	cprintf(cb, "<t1>%ld.%06ld</t1>", t1->tv_sec, t1->tv_usec);
+	*t1valid = 0;
+    }
+    gettimeofday(&t2, NULL);
+    cprintf(cb, "<t2>%ld.%06ld</t2>", t2.tv_sec, t2.tv_usec);
+    if (cbmetr && cbuf_len(cbmetr))
+	cprintf(cb, "%s", cbuf_get(cbmetr));
+
     cprintf(cb, "</input>");
     cprintf(ub, "%s/restconf/operations/grideye:agent-data", url);
     /* XXX return is JSON */
@@ -1803,8 +1809,8 @@ http_data(char               *url,
     default:
 	break;
     }
-    *tvalid = 0;
     gettimeofday(t1, NULL);
+    *t1valid = 1;
     /* XXX KLUDGE TO SEE IF IT IS XML. ERROR COMES AS HTML 
      * In all cases, go back to callhome mode.
      * If HTML, then we cant use XML parser, since it is not properly formed.
@@ -1824,12 +1830,17 @@ http_data(char               *url,
 	clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
 	goto ok;
     }
-    /* If not regular output, it is an error*/
-    if (xpath_first(xreply, "output") == NULL){
+    /* If not regular output, it is an error XXX // needed for old controller?
+     * Actually we get  <output>      <rpc-error>
+     */
+    if (xpath_first(xreply, "output") == NULL ||
+	xpath_first(xreply, "//rpc-error") != NULL){
 	if ((x = xpath_first(xreply, "//error-message")) != NULL)
 	    err = xml_body(x);
 	if ((x = xpath_first(xreply, "//error-tag")) != NULL)
 	    clicon_log(LOG_WARNING,  "%s: error: %s: %s", __FUNCTION__, xml_body(x), err?err:"");
+	else
+	    clicon_log(LOG_WARNING,  "%s: unspecified error from controller", __FUNCTION__);
 	*natstate = 0;
 	goto ok;
     }
@@ -1858,7 +1869,7 @@ http_data(char               *url,
 	}
 	t0->tv_sec = i64/1000000;;
 	t0->tv_usec = i64%1000000;
-	*tvalid = 1;
+	*t0valid = 1;
     }
     if ((x = xpath_first(xreply, "output")) != NULL)
 	if (xml_copy(x, *xplugin) < 0)
@@ -2254,8 +2265,9 @@ main(int   argc,
     char               pidfile[MAXPATHLEN];
     cxobj             *xtest = NULL;
     int                interval = 10000;
-    int                ctvalid = 0; /* If ct0 and ct1 are valid */
+    int                ct0valid = 0; /* If ct0 and ct1 are valid */
     struct timeval     ct0;
+    int                ct1valid = 0; /* If ct0 and ct1 are valid */
     struct timeval     ct1;
     uint64_t           sseq = 0;
     int                curl_timeout = CURL_TIMEOUT_DEFAULT;
@@ -2615,7 +2627,8 @@ main(int   argc,
 			  userid,
 			  NULL,
 			  &sseq,
-			  &ctvalid, &ct0, &ct1,
+			  &ct0valid, &ct0,
+			  &ct1valid, &ct1,
 			  curl_timeout,
 			  &natstate,
 			  &interval,
@@ -2735,7 +2748,8 @@ main(int   argc,
 				  userid,
 				  cb,
 				  &sseq,
-				  &ctvalid, &ct0, &ct1,
+				  &ct0valid, &ct0,
+				  &ct1valid, &ct1,
 				  curl_timeout,
 				  &natstate,
 				  &interval,
