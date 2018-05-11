@@ -116,7 +116,7 @@ extern const char GRIDEYE_VERSION[];
 /* Run with american fuzzy lop http://lcamtuf.coredump.cx/afl 
  * Only runs with -p http and replaces curl with stdin/stdout
  */
-#define FUZZ 1
+#undef FUZZ
 
 /* By default, this is where grideye_agent looks for plugins
  * This is normally set in configure/Makefile as $exec_prefix/lib/grideye
