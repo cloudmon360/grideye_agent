@@ -803,7 +803,7 @@ url_post(char *url,
 	clicon_err(OE_UNIX, errno, "malloc");
 	goto done;
     }
-    memset(err,0,CURL_ERROR_SIZE);
+    memset(err, 0, CURL_ERROR_SIZE);
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, err);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_get_cb);
@@ -2450,11 +2450,34 @@ main(int   argc,
 	clicon_err(OE_UNIX, errno, "calloc");
 	goto done;
     }
+    /* Init curl */
+    if (curl_global_init(CURL_GLOBAL_ALL) != 0){
+	clicon_err(OE_UNIX, errno, "curl_global_init");
+	goto done;
+    }
+
     /* Load test plugins, and call their init functions */
     clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Loading plugins from %s", plugin_dir);
 
     if (plugin_load_dir(plugin_dir, &plugins) < 0)
 	goto done;
+    /* Create two filenames, write file and large file for plugin setopts below */
+    if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
+			 DISKIO_WRITEFILE)) <= 0)
+	goto done;
+    if ((diskio_writefile = malloc(slen+1)) == NULL)
+	goto done;
+    snprintf(diskio_writefile, slen+1, "%s/%s", diskio_dir,
+	     DISKIO_WRITEFILE);
+    
+    if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
+			 DISKIO_LARGEFILE)) <= 0)
+	goto done;
+    if ((diskio_largefile = malloc(slen+1)) == NULL)
+	goto done;
+    snprintf(diskio_largefile, slen+1, "%s/%s", diskio_dir,
+	     DISKIO_LARGEFILE);
+
     /*
      * Iterate through plugins and call getopt/setopt functions
      * See options definitions in plugin/grideye_plugin.h
@@ -2502,21 +2525,6 @@ main(int   argc,
 	}
 
 	if (api->gp_setopt_fn){
-	    if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
-				 DISKIO_WRITEFILE)) <= 0)
-		goto done;
-	    if ((diskio_writefile = malloc(slen+1)) == NULL)
-		goto done;
-	    snprintf(diskio_writefile, slen+1, "%s/%s", diskio_dir,
-		     DISKIO_WRITEFILE);
-
-	    if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
-				 DISKIO_LARGEFILE)) <= 0)
-		goto done;
-	    if ((diskio_largefile = malloc(slen+1)) == NULL)
-		goto done;
-	    snprintf(diskio_largefile, slen+1, "%s/%s", diskio_dir,
-		     DISKIO_LARGEFILE);
 	    if (api->gp_setopt_fn("writefile", diskio_writefile) < 0){
 		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: setopt(writefile):%s",

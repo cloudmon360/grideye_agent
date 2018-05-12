@@ -17,7 +17,8 @@
  * @note Assume that the output (if any) is terminated by a LF/CR, or some other
  * non-printable character which can be replaced with \0 and yield a string
  */
-int fork_exec_read(char *buf, int buflen, ...)
+int
+fork_exec_read(char *buf, int buflen, ...)
 {
     int     retval = -1;
     int     stdin_pipe[2];
@@ -28,17 +29,14 @@ int fork_exec_read(char *buf, int buflen, ...)
     va_list ap;
     char   *s;
     int     argc;
-    char  **argv;
+    char  **argv = NULL;
     int     i;
 
     /* Translate from va_list to argv */
     va_start(ap, buflen);
-
     argc = 0;
-
     while ((s = va_arg(ap, char *)) != NULL)
 	argc++;
-
     va_end(ap);
     va_start(ap, buflen);
 
@@ -124,5 +122,7 @@ int fork_exec_read(char *buf, int buflen, ...)
     retval = len;
 
  done:
+    if (argv)
+	free(argv);
     return retval;
 }
