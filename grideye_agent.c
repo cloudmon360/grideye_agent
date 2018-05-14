@@ -2714,12 +2714,12 @@ main(int   argc,
 		    tv.tv_sec = callhome_timeout;
 	    }
 	    break;
-	case GRIDEYE_PROTO_HTTP: /* Eeeh need timer */
+	case GRIDEYE_PROTO_HTTP: 
 	    {
 		cbuf *cb;
 		if (natstate != 2){
 
-		    interval = 10000;
+		    interval = CALLHOME_DEFAULT;
 #ifdef FUZZ
 		    if (fuzz)
 			interval = 1;
