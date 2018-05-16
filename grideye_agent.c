@@ -72,11 +72,6 @@
 extern const char GRIDEYE_BUILDSTR[];
 extern const char GRIDEYE_VERSION[];
 
-#define	SEQ_LT(a,b)	((int)((a)-(b)) < 0)
-#define	SEQ_LEQ(a,b)	((int)((a)-(b)) <= 0)
-#define	SEQ_GT(a,b)	((int)((a)-(b)) > 0)
-#define	SEQ_GEQ(a,b)	((int)((a)-(b)) >= 0)
-
 /* Protocol agent version. Bundle with plugin API version
  * I.e. one agent version supports one plugin version
  * But one controller must support multiple agent versions
@@ -95,7 +90,6 @@ extern const char GRIDEYE_VERSION[];
 #define DISKIO_DIR        "/var/tmp"  /* in current dir */
 #define DISKIO_LARGEFILE  "GRIDEYE_LARGEFILE" /* To use for random read ops */
 #define DISKIO_WRITEFILE  "GRIDEYE_WRITEFILE" /* To use for trunc writing */
-#define BUFSIZE           8*1024
 
 #define GRIDEYE_AGENT_PIDFILE "/var/run/grideye_agent.pidfile"
 
@@ -129,9 +123,9 @@ extern const char GRIDEYE_VERSION[];
 #define GRIDEYE_PLUGIN_PYTHON 0x50595448
 
 #ifdef FUZZ
-#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:p:rLdw:P:zk:sT:Z"
+#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:w:P:zk:sT:Z"
 #else
-#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:p:rLdw:P:zk:sT:"
+#define GRIDEYE_AGENT_OPTS "hDFvtqe:f:i:a:l:W:u:I:N:w:P:zk:sT:"
 #endif
 
 /*
@@ -173,7 +167,6 @@ static struct sender *s_list = NULL;
 static char hostname[128] = {0,};/* name of this host, -N or gethostname */
 static int  pkts = 0;		 /* packets received counter */
 static int  errpkts = 0;	 /* dropped packets received counter */
-static int  nr_nobufs = 0;       /* global variable to log of buf overflows */
 struct timeval firstpkt, lastpkt;
 static int     quiet = 0;
 static struct plugin *plugins = NULL;
@@ -917,252 +910,6 @@ s_rm(struct sender *s)
     return 0;
 }
 
-/*! Register a sender, lock enum and source from this sender
- */
-static struct sender *
-s_add(void      *sname,
-      socklen_t  snamelen)
-
-{
-    struct sender   *s = NULL;
-
-    if ((s = (struct sender *)malloc(sizeof(*s))) == NULL){
-	clicon_err(OE_UNIX, errno, "malloc");
-	goto done;
-    }
-    memset(s, 0, sizeof(*s));
-    s->s_snamelen = snamelen;
-    if ((s->s_sname = malloc(snamelen)) == NULL){
-	clicon_err(OE_UNIX, errno, "malloc");
-	goto done;
-    }
-    memcpy(s->s_sname, sname, snamelen);
-    /* Always remove s_list to ensure single sender only */
-    if (s_list)
-	s_rm(s_list);
-    s->s_next = s_list;
-    s_list = s;
- done:
-    return s;
-}
-
-static struct sender *
-s_find(void      *sname,
-       socklen_t  snamelen)
-{
-    struct sender *s;
-
-    for (s = s_list; s; s = s->s_next)
-	if (s->s_snamelen == snamelen &&
-	    memcmp(sname, s->s_sname, snamelen)==0)
-	    return s;
-    return NULL;
-}
-
-/*
- * Format of sendbuf:
- * sequence:32
- * eid64:64
- * timeval:64
- */
-static int
-send_one_agent(int              s,
-	       struct sockaddr *addr,
-	       int              addrlen,
-	       char            *buf,
-	       int              len)
-{
-    int retval = -1;
-
-    if (sendto(s, buf, len, 0x0, addr, addrlen) < 0){
-	switch (errno){
-	case ENOBUFS: /* try again if ifq is empty */
-	    nr_nobufs++;
-	    clicon_log(LOG_WARNING,  "sendto %s %s", __FUNCTION__, strerror(errno));
-	    return 0;
-	    break;
-	case ENETUNREACH: /* try again */
-	    clicon_log(LOG_WARNING,  "sendto %s %s", __FUNCTION__, strerror(errno));
-	    return 0;
-	    break;
-	default:
-	    clicon_err(OE_UNIX, errno, "sendto");
-	    goto done;
-	}
-    }
-    retval = 0;
- done:
-    return retval;
-}
-
-/*! Received grideye data packet. Make application emulation
- * @param[in]  snd     Sender of received data packet
- * @param[in]  payload String payload in data packet
- * @retval -1  Fatal error
- * @retval  0  Error in packet, drop and continue
- * @retval  1  OK
- */
-static int
-echo_application(struct sender *snd,
-		 char          *myname,
-		 char          *payload,
-		 cbuf          *cb,
-		 struct plugin  plugins[])
-{
-    int                retval = -1;
-    uint64_t          *v = NULL;
-    int64_t           *vi = NULL;
-    int                i;
-    struct plugin     *p;
-    struct grideye_plugin_api *api;
-    char              *argstr;
-    char              *pstr;
-    int                pret;
-    char              *str = NULL;
-    cxobj             *xt = NULL;
-    cxobj             *x;
-    cxobj             *xp;
-    char              *xb;
-    cxobj            **xvec = NULL;
-    size_t             xlen;
-
-    clicon_log(LOG_DEBUG, "grideye_agent: %s payload:%s", __FUNCTION__, payload);
-    if (snd->s_xml == NULL){ /* <grideye> */
-	clicon_log(LOG_WARNING, "%s: Expected xml template when receiving data",
-		   __FUNCTION__);
-	retval = 0; 	    /* sanity check failed, just continue */
-	errpkts++;
-	goto done;
-    }
-    /* Look at payload in data packets:
-     * <grideye><version>2</version><name>a1</name><plugin><name>p1</name><param>12</param><param>www.youtube.com</param></plugin><plugin>p2</plugin></grideye> 
-     * and decompress
-     */
-    if (payload){
-	/* parse incoming payload XML */
-	if (json_parse_str(payload, &xt) < 0)
-	    goto done;
-	/* Check version */
-	if ((x = xpath_first(xt, "grideye/version")) == NULL){
-	    clicon_log(LOG_ERR, "grideye_agent: %s: <version> not found in payload",
-		       __FUNCTION__);
-	    retval = 0; 	    /* sanity check failed, just continue */
-	    errpkts++;
-	    goto done;
-	}
-	xb = xml_body(x);
-	if (xb==NULL || atoi(xb) != GRIDEYE_AGENT_VERSION){
-	    clicon_log(LOG_ERR, "grideye_agent: %s: Sender version %d expected, received %s",
-		       __FUNCTION__, GRIDEYE_AGENT_VERSION, xb);
-	    retval = 0; 	    /* sanity check failed, just continue */
-	    errpkts++;
-	    goto done;
-	}
-	/* Verify name of agent */
-	if ((x = xpath_first(xt, "grideye/name")) == NULL){
-	    clicon_log(LOG_ERR, "grideye_agent: %s: <name> not found in payload",
-		       __FUNCTION__);
-	    retval = 0; 	    /* sanity check failed, just continue */
-	    errpkts++;
-	    goto done;
-	}
-	xb = xml_body(x);
-	if (xb==NULL || strcmp(xb, myname)){
-	    clicon_log(LOG_ERR, "grideye_agent: %s: Expected name %s but received %s",
-		       __FUNCTION__, myname, xb);
-	    retval = 0; 	    /* sanity check failed, just continue */
-	    errpkts++;
-	    goto done;
-	}
-	/* Invoke plugins */
-	if (xpath_vec(xt, "grideye/plugin", &xvec, &xlen) < 0)
-	    goto done;
-	/* Loop through plugin calls */
-	for (i=0; i<xlen; i++){
-	    xp = xvec[i];
-	    if ((x = xpath_first(xp, "name")) == NULL){
-		clicon_log(LOG_ERR, "grideye_agent: %s: <name> expected in plugin",
-			   __FUNCTION__);
-		retval = 0; 	    /* sanity check failed, just continue */
-		errpkts++;
-		goto done;
-	    }
-	    pstr = xml_body(x);
-	    /* Find matching plugin */
-	    if ((p = plugin_find(pstr)) == NULL)
-		continue; /* silently ignore */
-	    if (p->p_disable)
-		continue; /* silently ignore */
-	    if ((api = p->p_api) == NULL)
-		continue; /* silently ignore */
-	    /* XXX only single argument */
-	    argstr = NULL;
-	    if ((x = xpath_first(xp, "param")) != NULL)
-		argstr = xml_body(x);
-
-	    if (api->gp_test_fn != NULL){
-		clicon_log(LOG_DEBUG, "grideye_agent: %s name:%s(%s)",
-			   __FUNCTION__, p->p_name, argstr?argstr:"");
-
-		if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
-		    if ((str = grideye_call_method(api->gp_name,
-						   (char *)api->gp_test_fn,
-						   argstr)) == NULL)
-			continue;
-		    clicon_log(LOG_NOTICE, "Returned %s", str);
-		} else {
-		    if ((pret = api->gp_test_fn(argstr, &str)) < 0) {
-			clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
-				   p->p_name, str?str:"");
-			continue;
-		    }
-		}
-
-		if (str){
-		    if ((api->gp_output_format==NULL && 
-			 strcmp(GRIDEYE_PLUGIN_OUTPUT_FORMAT, "json")==0)||
-			strcmp(api->gp_output_format, "json")==0){
-			cxobj *xt= NULL;
-			if (json_parse_str(str, &xt) < 0)
-			    goto done;
-			xml_rootchild(xt,0,&xt);
-			if (xml2json_cbuf(cb, xt, 0) < 0)
-			    goto done;
-			xml_free(xt);
-		    }
-		    else if ((api->gp_output_format==NULL && strcmp(GRIDEYE_PLUGIN_OUTPUT_FORMAT, "xml")==0)||
-			strcmp(api->gp_output_format, "xml")==0){
-			if (xml_parse_string(str, NULL, &xt) < 0)
-			    goto done;
-			cprintf(cb, "%s", str);
-			xml_free(xt);
-		    }
-		    else{
-			clicon_err(OE_PLUGIN, 0, "Inavlid output format %s (%s)", api->gp_output_format, GRIDEYE_PLUGIN_OUTPUT_FORMAT);
-			goto done;
-		    }
-		    free(str);
-		    str = NULL;
-		}
-	    }
-	}
-    } /* payload */
-
-    clicon_log(LOG_DEBUG, "grideye_agent: %s return:%s", __FUNCTION__, cbuf_get(cb));
-    retval = 1; /* OK */
- done:
-    if (xvec)
-       free(xvec);
-    if (xt)
-	xml_free(xt);
-    if (v)
-	free(v);
-    if (vi)
-	free(vi);
-    return retval;
-}
-
-
 static int
 echo_application_xml(cxobj         *xt,
 		     cbuf          *cb,
@@ -1257,266 +1004,6 @@ echo_application_xml(cxobj         *xt,
     return retval;
 }
 
-/*! Receive a packet, do stuff, and return it
- *                          no application monitoring
- * @param[in]      eid64str EID64 string, given or random for this agent
- * @param[in]      wi       Wireless interface name, or NULL if no wlan tests
- * @param[in]      name     If set with -n the name
- * @param[oit]     ok       Set to 1 if an OK (eg known sender) pkt arrived
- * xcontrol:  Ctrl hdr has been received and this is the one
- * snd:  0    A data packet has been received from an unregistered sender
- * snd:  1    A data packet has been received from a registered sender
- *     xcontrol  snd
- *       0       0           No ctrl hdr has been received
- *       0       1
- *       1       0           Most recent ctrl hdr
- *       1       1
- *------------------------------
- */
-static int
-echo_packet(int            s,
-	    struct timeval t1, /* when received */
-	    char          *buf,
-	    int            buflen,
-	    char          *eid64str,
-	    int            loss,
-	    int            reorder,
-	    int            duplicate,
-	    char          *wi,
-	    struct plugin  plugins[],
-	    char          *myname,
-	    int           *ok
-	    )
-{
-    int                retval = -1;
-    struct msghdr      msg;
-    struct iovec       iov[1];
-    struct cmsghdr    *cmsg;
-    struct timeval     t0; /* from sender */
-    struct timeval     t2;
-    struct timeval     dt;  /* t1-t0 */
-    char               cmsgbuf[64];
-    struct twoway_hdr  th;
-    uint32_t           tag;
-    cbuf              *cb = NULL; /* return payload */
-    int                fromlen;
-    struct sockaddr_in from={0,};
-    uint32_t           sseq = 0; // debug only
-    uint32_t           rlen = 0;
-    uint32_t           slen;
-    char              *dpayload = NULL;
-    struct sender     *snd = NULL; /* Sender of received data packet */
-    int                len;
-    cxobj             *xpayload = NULL;
-    int                ver;
-    enum mtype         mtype;
-
-    //    xr = NULL;
-    memset(&msg, 0, sizeof(msg));
-    memset(iov, 0, sizeof(iov));
-    iov[0].iov_base = buf;
-    iov[0].iov_len  = buflen;
-    msg.msg_iov     = iov;
-    msg.msg_iovlen  = 1;
-    fromlen = sizeof(from);
-    msg.msg_name = &from;
-    msg.msg_namelen = fromlen;
-    memset(cmsgbuf, 0, 64);
-    cmsg = (struct cmsghdr *)cmsgbuf;
-    msg.msg_control = cmsg;
-    msg.msg_controllen = 64;
-
-    /* Here is where the message is actually read */
-    if ((len = recvmsg(s, &msg, 0x0)) < 0){
-	clicon_err(OE_UNIX, errno, "recvmsg");
-	goto done;
-    }
-    clicon_log(LOG_DEBUG, "grideye_agent: %s: recvmsg from: %s:%hu", __FUNCTION__,
-	       inet_ntoa(from.sin_addr),
-	       ntohs(from.sin_port)
-	       );
-    if (len == 0){
-	clicon_log(LOG_WARNING, "grideye_agent: %s: close socket, len=0", __FUNCTION__);
-	goto done;
-    }
-    if (len < 8){
-	clicon_log(LOG_WARNING, "grideye_agent: %s: dropped packet len:%d",
-		   __FUNCTION__, len);
-	retval = 0; 	    /* sanity check failed, just continue */
-	errpkts++;
-	goto done;
-    }
-#if 1
-    clicon_log(LOG_DEBUG, "%s: pkt dump: [%02x%02x%02x%02x %02x%02x%02x%02x]",
-	       __FUNCTION__,
-	       buf[0]&0xff, buf[1]&0xff, buf[2]&0xff, buf[3]&0xff,
-	       buf[4]&0xff, buf[5]&0xff, buf[6]&0xff, buf[7]&0xff);
-#endif
-
-#ifdef DUMPMSGFILE
-    /* This is for record / replay with nc -u */
-    {
-	static int ii=0;
-	char filename[1024];
-	FILE *f;
-	snprintf(filename, 1024, "%s%d", DUMPMSGFILE, ii++);
-	if ((f = fopen(filename, "w")) == NULL){
-	    clicon_err(OE_UNIX, errno, "fopen");
-	    goto done;
-	}
-	fwrite(buf, 1, len, f);
-	fclose(f);
-    }
-#endif
-    /* Peek straight into message before decoding, see twoway_hdr */
-    ver   = buf[0];
-    mtype = buf[1];
-    tag   = ((int*)buf)[1]; /* Second 32-bit word for twoway. */
-    if (ver != PROTO_VERSION){
-	clicon_log(LOG_WARNING, "grideye_agent: %s: dropped version:'%d'",
-		   __FUNCTION__, ver, ver);
-	retval = 0;
-	errpkts++;
-	goto done;
-    }
-    if (ntohl(tag) != TWOWAY_TAG){
-	clicon_log(LOG_WARNING, "grideye_agent: %s: unexpected tag :0x%x",
-		   __FUNCTION__, ntohl(tag));
-	retval = 0;
-	errpkts++;
-	goto done;
-    }
-    if (mtype != MTYPE_TWOWAY){
-	clicon_log(LOG_WARNING, "grideye_agent: %s: Not expected message type :%d",
-		   __FUNCTION__, mtype);
-	retval = 0; 	    /* sanity check failed, just continue */
-	errpkts++;
-	goto done;
-    }
-    switch (mtype){
-    case MTYPE_TWOWAY:
-	clicon_log(LOG_DEBUG, "grideye_agent: %s: MTYPE_TWOWAY", __FUNCTION__);
-	/* Check sender registered in callhome_http*/
-	if ((snd = s_find(msg.msg_name, msg.msg_namelen)) == NULL){
-	  clicon_log(LOG_DEBUG, "grideye_agent: Unregistered twoway sender %s:%hu",
-		     inet_ntoa(from.sin_addr), ntohs(from.sin_port));
-	    retval = 0; 	    /* sanity check failed, just continue */
-	    errpkts++;
-	    goto done;
-	}
-	if (decode_twoway(buf, len, &th, &dpayload, &rlen) < 0){
-	    clicon_log(LOG_DEBUG, "grideye_agent: %s: dropped packet decode_twoway len:%d",
-		       __FUNCTION__, len);
-	    retval = 0; 	    /* sanity check failed, just continue */
-	    errpkts++;
-	    goto done;
-	}
-	if (reorder){
-	    if (reorder == th.th_seq0){
-		clicon_log(LOG_DEBUG, "grideye_agent: Reorder %d -> %d", th.th_seq0, th.th_seq0+1);
-		th.th_seq0 = th.th_seq0+1;
-	    }
-	    else if (reorder+1 == th.th_seq0){
-		clicon_log(LOG_DEBUG, "grideye_agent: Reorder %d -> %d", th.th_seq0, th.th_seq0-1);
-		th.th_seq0 = th.th_seq0-1;
-	    }
-	}
-	sseq = th.th_seq0;
-	t0 = th.th_t0;
-	break;
-    default:
-	retval = 0;
-	errpkts++;
-	goto done;
-    	break;
-    }
-    /*
-     * A data-packet has been received. This is its state:
-     * snd holds it control state if any. If snd=NULL the control packet has
-     * not received yet or it is just a non-grideye_sender
-     */
-    *ok = 1; /* ok pkt */
-    for (cmsg=CMSG_FIRSTHDR(&msg); cmsg!=NULL; cmsg=CMSG_NXTHDR(&msg,cmsg)) {
-	if (cmsg->cmsg_type==IP_TTL) {
-	    if (CMSG_DATA(cmsg) !=  NULL){
-//			ttl = *(int*)CMSG_DATA(cmsg);
-		break;
-	    }
-	}
-    }
-#if 0
-    if (SEQ_LEQ(i,last))
-	fprintf(stderr, "Duplicated or reordered packet %d\n", i);
-    else
-	last = i;
-#endif
-    /*
-     * Here starts actual tests. Would like this to be more generic,
-     * ie easy to add new tests.
-     */
-    /* Global packet counter */
-    pkts++;
-    if (pkts == 1)
-	firstpkt = t1;
-    lastpkt = t1;
-    /* Payload buffer. If no registered sender this is empty */
-    if ((cb = cbuf_new()) ==NULL){
-	clicon_err(OE_PLUGIN, errno, "cbuf_new");
-	goto done;
-    }
-
-    /* Here starts 'Application monitoring' ie 'programable behaviour'
-     * Only do this if sender is known and if we have received grideye
-     * control packets
-     */
-    if (snd != NULL){
-	/* Problem: three-value return
-	 * Fatal error: -1 and quit
-	 * Drop: 0: return 0, break
-	 * OK: 1 continue
-	 */
-	if ((retval = echo_application(snd, myname, dpayload, cb, plugins)) < 0)
-	    goto done;
-	if (retval == 0)
-	    goto done;
-	retval = -1;
-    }
-    slen = sizeof(th)+cbuf_len(cb)+1;
-    t2 = gettimestamp();
-
-    if (snd)
-	th.th_seq1 = snd->s_seq++;
-    th.th_t1 = t1;
-    th.th_t2 = t2;
-    if (encode_twoway(buf, slen, &th, cbuf_get(cb)) < 0)
-	goto done;
-    /* Simulated loss and duplicate for debugging */
-    if (loss && loss == sseq)
-	clicon_log(LOG_DEBUG, "grideye_agent: Loss %d", sseq);
-    else{
-	if (send_one_agent(s, msg.msg_name, msg.msg_namelen, buf, slen) < 0)
-	    goto done;
-    }
-    if (duplicate && duplicate==sseq){
-	clicon_log(LOG_DEBUG, "grideye_agent: Duplicate %d", sseq);
-	if (send_one_agent(s, msg.msg_name, msg.msg_namelen, buf, slen) < 0)
-	    goto done;
-    }
-
-    if (debug){
-	timersub(&t1, &t0, &dt);
-	clicon_log(LOG_DEBUG, "grideye_agent: %s seq: %u %lu.%06lu",
-		   __FUNCTION__, sseq, dt.tv_sec, dt.tv_usec);
-    }
-    retval = 0;
-  done:
-    clicon_debug(1, "%s retval: %d", __FUNCTION__, retval);
-    if (xpayload)
-	xml_free(xpayload);
-    if (cb)
-	cbuf_free(cb);
-    return retval;
-}
 
 /*! This is signaling: create agent to send to this agent 
  * Send a CURL POST to controller and register (or change) existing agent.
@@ -1537,7 +1024,6 @@ static int
 callhome_http(char               *url,
 	      char               *name,
 	      char               *id,
-	      enum grideye_proto  proto,
 	      struct sockaddr_in *myaddr,
 	      char               *info,
 	      int                 curl_timeout,
@@ -1550,11 +1036,7 @@ callhome_http(char               *url,
     char  *getdata = NULL;
     cxobj *xreply = NULL;
     cxobj *x;
-    int    udp_sport;
     char  *remoteip = NULL;
-    int    haddr; /* nat addr */
-    struct sender *snd = NULL;
-    struct sockaddr_in sndaddr = {0,};
     struct plugin *p;
     int    i;
     int    ret;
@@ -1602,7 +1084,7 @@ callhome_http(char               *url,
 	cprintf(cb, "\"%s\"", p->p_name);
     }
     cprintf(cb, "],");
-    cprintf(cb, "\"proto\":\"%s\"", grideye_proto2str(proto));
+    cprintf(cb, "\"proto\":\"%s\"", grideye_proto2str(GRIDEYE_PROTO_HTTP));
     cprintf(cb, "}}");
     cprintf(ub, "%s/restconf/operations/grideye:callhome", url);
     ret = url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+json", NULL, curl_timeout,
@@ -1620,59 +1102,6 @@ callhome_http(char               *url,
 	goto done;
 
     /* xml parse reply: here is where we get the port */
-    switch (proto){
-    case GRIDEYE_PROTO_TCP:
-    case GRIDEYE_PROTO_UDP:
-	if (getdata==NULL)
-	    break;
-	clicon_debug(1, "grideye_agent: %s remoteip:%s getdata:%s", __FUNCTION__,
-		   remoteip, getdata);
-	if (json_parse_str(getdata, &xreply) < 0){
-	    clicon_log(LOG_WARNING,  "grideye_agent: %s: json parse error: %s", __FUNCTION__, getdata);
-	    /* Note this could actually be html, eg broken xml */
-	    retval = 0;
-	    goto done;
-	}
-	clicon_log(LOG_DEBUG,  "grideye_agent: %s: xml OK", __FUNCTION__);
-	if (*natstate > 0 && remoteip && xreply){
-	    *natstate = 1;/* if changed sender, natstate may be 2 */
-	clicon_log(LOG_DEBUG,  "grideye_agent: %s: natstate to 1", __FUNCTION__);
-	    sndaddr.sin_family = AF_INET;
-#ifdef HAVE_SIN_LEN
-	    sndaddr.sin_len = sizeof(sndaddr);
-#endif
-	    if ((haddr = inet_addr(remoteip)) != -1)
-		sndaddr.sin_addr.s_addr = haddr;
-	    if ((x = xpath_first(xreply, "//udp_sport")) != NULL){
-		if ((udp_sport = atoi(xml_body(x))) != 0){
-		    sndaddr.sin_port = htons(udp_sport);
-		    *natstate = 2;
-		}
-	    }
-	    else
-		clicon_log(LOG_DEBUG, "grideye_agent: %s: no udp sport", __FUNCTION__);
-	    if (*natstate > 1){
-		/* register sender */
-		if ((snd = s_find(&sndaddr, sizeof(sndaddr))) == NULL){
-		    if ((snd = s_add(&sndaddr, sizeof(sndaddr))) == NULL)
-			goto done;
-		    /* XXX for TCP do connect */
-		    clicon_log(LOG_DEBUG, "grideye_agent: Registered new sender %s:%hu",
-			       inet_ntoa(sndaddr.sin_addr),
-			       ntohs(sndaddr.sin_port));
-		    if ((snd->s_name = strdup(name)) == NULL){
-			clicon_err(OE_UNIX, errno, "strdup");
-			goto done;
-		    }
-		}
-		if (snd->s_xml != NULL)
-		    xml_free(snd->s_xml); /* delete old tree */
-		snd->s_xml = xreply;
-		xreply = NULL;
-	    }
-	}
-	break;
-    case GRIDEYE_PROTO_HTTP:
 	/* XXX KLUDGE TO SEE IF IT IS XML. ERROR COMES AS HTML 
 	 * In all cases, go back to callhome mode.
 	 * If HTML, then we cant use XML parser, since it is not properly formed.
@@ -1703,10 +1132,6 @@ callhome_http(char               *url,
 	    goto ok;
 	}
 	*natstate = 2;
-	break;
-    default:
-      break;
-    }
  ok:
     retval = 0;
  done:
@@ -1893,66 +1318,6 @@ http_data(char               *url,
     return retval;
 }
 
-/*! This is for NAT traversal: send udp towards server just to open existing stream 
- * Timeout only when there havent been any packets for some time.
- * @param[in]  s         Socket to send on
- * @param[in]  myaddr    Address, port of locally bound socket
- * @param[in]  sndaddr   Address to send a nat traversal probe packet to.
- * @param[in]  buf       Raw message buffer to re-use
- * @param[in]  len       Length of message buffer buf
- * @param[in]  name      Name of sender/agent
- * @param[in]  eid64str  EID64 string, given or random for this agent
- * @see callhome_http
- */
-static int
-nattraversal_udp(int                 s,
-		 struct sockaddr_in *myaddr,
-		 char               *name,
-		 char               *eid64str)
-{
-    int                retval = -1;
-    struct control_hdr ch0;
-    int                clen;
-    cbuf              *xmlbuf = NULL;
-    char               buf[BUFSIZE];
-    int                len = BUFSIZE;
-    struct sockaddr_in *sndaddr;
-    struct sender      *snd;
-
-    if ((snd = s_list) == NULL)
-	return 0;
-    sndaddr = (struct sockaddr_in *)(snd->s_sname);
-    clicon_log(LOG_DEBUG, "grideye_agent: %s nat probe address : %s:%u",
-		 __FUNCTION__,
-		 inet_ntoa(sndaddr->sin_addr),
-		 ntohs(sndaddr->sin_port));
-    assert(sndaddr->sin_port);
-    memset(&ch0, 0, sizeof(ch0));
-    ch0.ch_ver   = PROTO_VERSION;
-    ch0.ch_mtype = MTYPE_CONTROL;
-    ch0.ch_tag2  = TWOWAY_TAG;
-    if ((xmlbuf = cbuf_new()) == NULL)
-	goto done;
-    cprintf(xmlbuf, "<grideye><version>%d</version><name>%s</name><E64>%s</E64>", 
-	    GRIDEYE_AGENT_VERSION,
-	    name,
-	    eid64str);
-    cprintf(xmlbuf, "</grideye>");
-    if ((clen = encode_control(buf, len, &ch0, cbuf_get(xmlbuf))) < 0)
-	goto done;
-    if (send_one_agent(s,
-		       (struct sockaddr*)sndaddr,
-		       sizeof(*sndaddr),
-		       buf, clen) < 0){
-	goto done;
-    }
-    retval = 0;
- done:
-    if (xmlbuf)
-	cbuf_free(xmlbuf);
-    return retval;
-}
-
 
 /* For linux /proc */
 #define PROC_CPUINFO "/proc/cpuinfo"
@@ -2000,76 +1365,6 @@ get_system_info(char **info)
     return retval;
 }
 
-/*! This is for NAT traversal: connect via tcp to grideye_sender
- * Timeout only when there havent been any packets for some time.
- * @param[in]  s         Socket to send on
- * @param[in]  myaddr    Address, port of locally bound socket
- * @param[in]  sndaddr  Address to send a nat traversal probe packet to.
- * @param[in]  buf       Raw message buffer to re-use
- * @param[in]  len       Length of message buffer buf
- * @param[in]  name      Name of sender/agent
- * @param[in]  eid64str  EID64 string, given or random for this agent
- * @see callhome_http
- */
-static int
-nattraversal_tcp(int                 s,
-		 struct sockaddr_in *myaddr,
-		 char               *name,
-		 char               *eid64str,
-		 int                *natstate)
-{
-    int                retval = -1;
-    struct control_hdr ch0;
-    int                clen;
-    cbuf              *xmlbuf = NULL;
-    char               buf[BUFSIZE];
-    int                len = BUFSIZE;
-    struct sockaddr_in *sndaddr;
-    struct sender      *snd;
-
-    clicon_log(LOG_DEBUG, "grideye_agent: %s", __FUNCTION__);
-    if ((snd = s_list) == NULL)
-	return 0;
-    sndaddr = (struct sockaddr_in *)(snd->s_sname);
-
-    clicon_log(LOG_DEBUG, "grideye_agent: %s Trying to connect to : %s:%u",
-		 __FUNCTION__,
-		 inet_ntoa(sndaddr->sin_addr),
-		 ntohs(sndaddr->sin_port));
-    if (connect(s, (struct sockaddr *)sndaddr, sizeof(*sndaddr)) < 0){
-	clicon_err(OE_UNIX, errno, "connect");
-	goto done;
-    }
-    clicon_log(LOG_DEBUG, "grideye_agent: %s connectected to : %s:%u",
-		 __FUNCTION__,
-		 inet_ntoa(sndaddr->sin_addr),
-		 ntohs(sndaddr->sin_port));
-    memset(&ch0, 0, sizeof(ch0));
-    ch0.ch_ver   = PROTO_VERSION;
-    ch0.ch_mtype = MTYPE_CONTROL;
-    ch0.ch_tag2  = TWOWAY_TAG;
-    if ((xmlbuf = cbuf_new()) == NULL)
-	goto done;
-    cprintf(xmlbuf, "<grideye><version>%d</version><name>%s</name><E64>%s</E64>", 
-	    GRIDEYE_AGENT_VERSION,
-	    name,
-	    eid64str);
-    cprintf(xmlbuf, "</grideye>");
-    if ((clen = encode_control(buf, len, &ch0, cbuf_get(xmlbuf))) < 0)
-	goto done;
-    if (send_one_agent(s, NULL, 0, buf, clen) < 0)
-	goto done;
-    *natstate = 3;
-    retval = 0;
- done:
-    clicon_log(LOG_DEBUG, "grideye_agent: %s retval:%d",
-	       __FUNCTION__, retval);
-
-    if (xmlbuf)
-	cbuf_free(xmlbuf);
-    return retval;
-}
-
 static void
 grideye_sig(int arg)
 {
@@ -2110,65 +1405,6 @@ doexit(int arg)
     exit(0);
 }
 
-/*!
- * @param[in]  xym           yang metrics required for this agent
- */
-static int
-callhome(int                 s,
-	 char               *callhome_url,
-	 char               *hostname,
-	 char               *userid,
-	 enum grideye_proto  proto,
-	 int                *natstate,
-	 struct sockaddr_in *myaddr,
-	 char               *eid64str,
-	 char               *info,
-	 int                 curl_timeout,
-	 cxobj              *xym
-	 )
-{
-    int            retval = -1;
-
-    clicon_log(LOG_DEBUG, "grideye_agent: %s", __FUNCTION__);
-    if (callhome_url && userid){     /* Timeout Send a (call)home message */
-	if (callhome_http(callhome_url,
-			  hostname,
-			  userid,
-			  proto,
-			  myaddr,
-			  info,
-			  curl_timeout,
-			  xym,
-			  natstate) < 0)
-	    goto done;
-    }
-    clicon_log(LOG_DEBUG, "grideye_agent: %s natstate:%d", __FUNCTION__, *natstate);
-    if ((*natstate) > 1){     /* Timeout Send a (call)home message */
-	switch(proto){
-	case GRIDEYE_PROTO_TCP:
-	    if (nattraversal_tcp(s,
-				 myaddr,
-				 hostname,
-				 eid64str,
-				 natstate) < 0)
-		goto done;
-	    break;
-	case GRIDEYE_PROTO_UDP:
-	    if (nattraversal_udp(s,
-				 myaddr,
-				 hostname,
-				 eid64str) < 0)
-		goto done;
-	    break;
-	default:
-	    break;
-	}
-    }
-    retval = 0;
- done:
-    return retval;
-}
-
 static void
 usage(char *argv0)
 {
@@ -2191,10 +1427,6 @@ usage(char *argv0)
 	    "\t-u <url>\tCall home URL. Send if no rx traffic in -t s\n"
 	    "\t-I <id>\t\tId to use with -u\n"
 	    "\t-N <name>\tName to use in logs and callhome. default is hostname\n"
-	    "\t-p udp|tcp|http\tData protocol to use with -u. Default http\n"
-	    "\t-r \t\tSynthetic reorder of pkt 30\n"
-	    "\t-L \t\tSynthetic loss of pkt 20\n"
-	    "\t-d \t\tSynthetic duplicate of pkt 40\n"
 #ifdef FUZZ
 	    "\t-Z \t\tFuzz (afl) simulation\n"
 #endif
@@ -2222,34 +1454,24 @@ main(int   argc,
 {
     char               *argv0;
     int                 retval = -1;
-    int                 s = -1;
     int                 c;
     struct in_addr      inaddr = {0, };
     unsigned short      localport; /* local port */
-    struct sockaddr_in  myaddr = {0, };
     fd_set              fdset;
     int                 callhome_timeout;
     char               *filename;
     FILE               *f;
     uint64_t            eid64;
     char                eid64str[24];
-    int                 yes;
     int                 n;
     char               *diskio_dir;
     char               *diskio_largefile = NULL;
     char               *diskio_writefile = NULL;
-    char               buf[BUFSIZE];
-    int                len = BUFSIZE;
-    struct timeval     t1; /* when received */
     int                natstate; /* state: 0:none 1:enabled 2:addr&port defined */
     char               *callhome_url;
     struct timeval     tv;
     struct timeval     trnd;
-    int                loss;
-    int                reorder;
-    int                duplicate;
     char               *userid = NULL;
-    enum grideye_proto proto;
     char               *wi = NULL; /* Wireless interface */
     //char               *plugin_dir = NULL;
     struct plugin      *p;
@@ -2261,7 +1483,6 @@ main(int   argc,
     struct stat        st;
     char               *info = NULL;
     int                errno0;
-    int                ok;
     char               pidfile[MAXPATHLEN];
     cxobj             *xtest = NULL;
     int                interval = 10000;
@@ -2287,16 +1508,11 @@ main(int   argc,
     eid64 = random();
     eid64 = eid64<<32;
     eid64 |= random();
-    yes = 1;
     zap = 0;
     diskio_dir  = DISKIO_DIR;
-    loss = 0;
-    reorder = 0;
-    duplicate = 0;
     plugin_dir = PLUGINDIR;
     plugins = NULL;
     foreground = 0;
-    proto = GRIDEYE_PROTO_HTTP;
     strncpy(pidfile, GRIDEYE_AGENT_PIDFILE, sizeof(pidfile)-1);
     ssl_verifypeer = 0;
 #ifdef FUZZ
@@ -2367,21 +1583,6 @@ main(int   argc,
 	case 'N':    /* Name to use with -u and in logs */
 	    strncpy(hostname, optarg, sizeof(hostname));
 	    hostname[sizeof(hostname) - 1]= '\0';
-	    break;
-	case 'p':    /* protocol (tcp, udp or http) */
-	    if ((proto = grideye_str2proto(optarg)) < 0){
-		fprintf(stderr, "Invalid proto: %s\n", optarg);
-		usage(argv0);
-	    }
-	    break;
-	case 'r':    /* Synthetic reorder */
-	    reorder = 30;
-	    break;
-	case 'L':    /* Synthetic loss */
-	    loss = 20;
-	    break;
-	case 'd':    /* Synthetic duplicate */
-	    duplicate = 40;
 	    break;
 	case 'w':    /* Wireless interface */
 	    wi = optarg;
@@ -2561,78 +1762,22 @@ main(int   argc,
     set_signal(SIGINT, grideye_sig, NULL);
     set_signal(SIGTERM, grideye_sig, NULL);
 
-    /* Initialize: create/bind socket for tcp/udp */
-    switch (proto){
-    case GRIDEYE_PROTO_TCP:
-	if ((s = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-	    clicon_err(OE_UNIX, errno, "socket");
-	    goto done;
-	}
-	break;
-    case GRIDEYE_PROTO_UDP:
-	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-	    clicon_err(OE_UNIX, errno, "socket");
-	    goto done;
-	}
-	if (socket_bind_udp(s,
-			    &inaddr,
-			    localport,
-			    &myaddr) < 0)
-	    goto done;
-	/* From here on use myaddr, not localport/inaddr */
-	clicon_log(LOG_NOTICE, "grideye_agent: Listening to: %s:%hu",
-		   inet_ntoa(myaddr.sin_addr), ntohs(myaddr.sin_port));
-	/* Local socket */
-	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) < 0){
-	    clicon_err(OE_UNIX, errno, "socket");
-	    goto done;
-	}
-#if defined(SOL_IP)
-	if(setsockopt(s, SOL_IP, IP_RECVTTL, &yes, sizeof(int))<0){
-	    clicon_err(OE_UNIX, errno, "socket");
-	    goto done;
-	}
-#endif
-	break;
-    case GRIDEYE_PROTO_HTTP:
-    default:
-	break;
-    }
-    /* kickstart */
-    switch (proto){
-    case GRIDEYE_PROTO_TCP:
-    case GRIDEYE_PROTO_UDP:
-	if (callhome(s,
-		     callhome_url,
-		     hostname,
-		     userid,
-		     proto,
-		     &natstate,
-		     &myaddr,
-		     eid64str,
-		     info,
-		     curl_timeout,
-		     xym) < 0)
-	    goto done;
-	break;
-    case GRIDEYE_PROTO_HTTP:
-	if (callhome_url && userid)     /* Timeout Send a (call)home message */
-	    if (callhome_http(callhome_url,
-			      hostname,
-			      userid,
-			      proto,
-			      NULL,
-			      info,
-			      curl_timeout,
-			      xym,
-			      &natstate) < 0)
-		goto done;
-	if ((xtest = xml_new("new", NULL, NULL)) == NULL)
-	    goto done;
-	if (natstate == 2)
-	    if (http_data(callhome_url,
+    if (callhome_url && userid)     /* Timeout Send a (call)home message */
+	if (callhome_http(callhome_url,
 			  hostname,
 			  userid,
+			  NULL,
+			  info,
+			  curl_timeout,
+			  xym,
+			  &natstate) < 0)
+	    goto done;
+    if ((xtest = xml_new("new", NULL, NULL)) == NULL)
+	goto done;
+    if (natstate == 2)
+	if (http_data(callhome_url,
+		      hostname,
+		      userid,
 			  NULL,
 			  &sseq,
 			  &ct0valid, &ct0,
@@ -2641,35 +1786,19 @@ main(int   argc,
 			  &natstate,
 			  &interval,
 			  &xtest) < 0)
-		goto done;
-	break;
-    default:
-      break;
-    }
+	    goto done;
     tv.tv_sec = callhome_timeout;
     for (;;){
+	cbuf *cb;
 	FD_ZERO(&fdset);
 	tv.tv_usec = 0;
-	switch (proto){
-	case GRIDEYE_PROTO_UDP:
-	    FD_SET(s, &fdset);
-	    break;
-	case GRIDEYE_PROTO_TCP:
-	    if (natstate > 2) /* connected */
-		FD_SET(s, &fdset);
-	    break;
-	case GRIDEYE_PROTO_HTTP:
-	    tv.tv_sec = interval/1000;
-	    tv.tv_usec = interval%1000;
-	default:
-	    break;
-	}
+	tv.tv_sec = interval/1000;
+	tv.tv_usec = interval%1000;
 	//clicon_log(LOG_DEBUG, "Callhome timeout: %d", callhome_timeout;)
 
 	n = select(FD_SETSIZE, &fdset, NULL, NULL, &tv);
 	/* Consider timeout to be undefined after select() returns. */
 	errno0 = errno;
-	t1 = gettimestamp();
 	if (n == -1) {
 	    clicon_err(OE_UNIX, errno0, "select");
 	    goto done;
@@ -2677,58 +1806,15 @@ main(int   argc,
 	/* Timeout */
 
 	/* Check sockets */
-	switch(proto){
-	case GRIDEYE_PROTO_TCP:
-	case GRIDEYE_PROTO_UDP:
-	    if (n==0){
-		if (callhome(s,
-			     callhome_url,
-			     hostname,
-			     userid,
-			     proto,
-			     &natstate,
-			     &myaddr,
-			     eid64str,
-			     info,
-			     curl_timeout,
-			     xym) < 0)
-		    goto done;
-		tv.tv_sec = callhome_timeout;
-	    }
-	    if (FD_ISSET(s, &fdset)){  /* udp. can this work for tcp? */
-		ok = 0;
-		if (echo_packet(s,
-				t1,
-				buf,
-				len,
-				eid64str,
-				loss,
-				reorder,
-				duplicate,
-				wi,
-				plugins,
-				hostname,
-				&ok) < 0)
-		    goto done;
-		if (ok)
-		    tv.tv_sec = callhome_timeout;
-	    }
-	    break;
-	case GRIDEYE_PROTO_HTTP: 
-	    {
-		cbuf *cb;
-		if (natstate != 2){
-
-		    interval = CALLHOME_DEFAULT;
+	if (natstate != 2){
+	    interval = CALLHOME_DEFAULT;
 #ifdef FUZZ
-		    if (fuzz)
-			interval = 1;
+	    if (fuzz)
+		interval = 1;
 #endif
-
-		    if (callhome_http(callhome_url,
-				      hostname,
-				      userid,
-				      proto,
+	    if (callhome_http(callhome_url,
+			      hostname,
+			      userid,
 				      NULL,
 				      info,
 				      curl_timeout,
@@ -2769,11 +1855,6 @@ main(int   argc,
 			cb = NULL;
 		    }
 		}
-	    }
-	    break;
-	default:
-	  break;
-	}
     } /* for */
     retval = 0;
  done:
@@ -2781,18 +1862,17 @@ main(int   argc,
 	xml_free(xym);
     if (xtest)
 	xml_free(xtest);
-    if (s != -1)
-	close(s);
 #if 0
     if (callhome_url && name && userid){     /* Timeout Send a (call)home message */
-	if (callhome_http(callhome_url, name, userid, proto, localport, info,
+	if (callhome_http(callhome_url, name, userid, localport, info,
 			  &natstate, 1) < 0)
 	    goto done;
+    }
 #endif
-	if (diskio_writefile)
-	    free(diskio_writefile);
-	if (diskio_largefile)
-	    free(diskio_largefile);
+    if (diskio_writefile)
+	free(diskio_writefile);
+    if (diskio_largefile)
+	free(diskio_largefile);
     doexit(0);
     return(retval);
 }
