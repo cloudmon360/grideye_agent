@@ -62,7 +62,9 @@ MYLIBSO      = libgrideye_agent.so.1
 MYLIBLINK    = libgrideye_agent.so
 
 # Sub-directores.
-SUBDIRS = plugins docker
+SUBDIRS = plugins
+
+DOCKER_IMAGE = cloudmon360/grideye_agent
 
 .PHONY:	build.c all clean distclean install uninstall depend TAGS $(SUBDIRS)
 
@@ -77,6 +79,13 @@ $(SUBDIRS):
 
 grideye_agent :	grideye_agent.c $(LIBOBJS) 
 	$(CC) $(CFLAGS) $(INCLUDES) $< $(LDFLAGS) $(LIBOBJS) $(LIBS) -o $@ 
+
+.PHONY: docker push $(DOCKER_IMAGE)
+docker:
+	docker build -t $(DOCKER_IMAGE) .
+
+push:
+	docker push $(DOCKER_IMAGE)
 
 $(MYLIB) : $(LIBOBJS)
 ifeq ($(HOST_VENDOR),apple)
