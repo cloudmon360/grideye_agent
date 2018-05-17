@@ -53,9 +53,10 @@ WORKDIR /grideye/grideye_agent/plugins/
 RUN make install
 
 RUN rm -rf /grideye
+RUN ldconfig
 
 # Create a file for disk IO tests
 RUN /bin/dd if=/dev/zero of=/var/tmp/GRIDEYE_LARGEFILE bs=1M count=1K
 
 # Run grideye-agent
-CMD grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s
+CMD if [ -z "$NOSSL" ]; then grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s; else grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s -s; fi
