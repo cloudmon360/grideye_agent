@@ -141,7 +141,4 @@ LDFLAGS+=" `$PATHPYCONF --libs`"
 AC_OUTPUT(
 	Makefile
 	plugins/Makefile
-	docker/Makefile
-	docker/Dockerfile
-
 )
