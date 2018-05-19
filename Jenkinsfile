@@ -1,3 +1,5 @@
+/* Pipeline for Grideye Agent */
+
 node {
     try {
      	stage('Checkout') {
