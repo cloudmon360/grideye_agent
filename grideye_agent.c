@@ -498,7 +498,7 @@ grideye_plugin_load_py(void *handle,
     api->gp_exit_fn = (grideye_plugin_exit_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 8));
 
     /* Make it possible to distinguish between regular plugins and py-plugins */
-    api->gp_magic = (gp_magic & GRIDEYE_PLUGIN_PYTHON);
+    api->gp_magic = GRIDEYE_PLUGIN_PYTHON;
 
     len = plugins_len(*plugins);
     if ((*plugins = realloc(*plugins, (len+2)*sizeof(struct plugin))) == NULL){
@@ -1104,7 +1104,7 @@ echo_application(struct sender *snd,
 		clicon_log(LOG_DEBUG, "grideye_agent: %s name:%s(%s)",
 			   __FUNCTION__, p->p_name, argstr?argstr:"");
 
-		if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
+		if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
 		    if ((str = grideye_call_method(api->gp_name,
 						   (char *)api->gp_test_fn,
 						   argstr)) == NULL)
@@ -1214,8 +1214,7 @@ echo_application_xml(cxobj         *xt,
 	    argstr = xml_body(x);
 
 	if (api->gp_test_fn != NULL) {
-
-	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
+	    if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
 		if ((str = grideye_call_method(api->gp_name,
 					       (char *)api->gp_test_fn,
 					       argstr)) == NULL)
@@ -2486,7 +2485,7 @@ main(int   argc,
 	if (api->gp_getopt_fn) {
 	    yangmetric = NULL;
 
-	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
+	    if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
 		if ((yangmetric = grideye_call_method(api->gp_name,
 						      (char *)api->gp_getopt_fn,
 						      "yangmetric")) == NULL) {
