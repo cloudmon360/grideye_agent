@@ -911,17 +911,17 @@ s_rm(struct sender *s)
 }
 
 static int
-echo_application_xml(cxobj         *xt,
-		     cbuf          *cb,
-		     struct plugin  plugins[])
+echo_application(cxobj         *xt,
+		 cbuf          *cb,
+		 struct plugin  plugins[])
 {
     int                retval = -1;
     uint64_t          *v = NULL;
     int64_t           *vi = NULL;
     int                i;
+    int                j;
     struct plugin     *p;
     struct grideye_plugin_api *api;
-    char              *argstr;
     char              *pstr;
     int                pret;
     char              *str = NULL;
@@ -929,6 +929,9 @@ echo_application_xml(cxobj         *xt,
     cxobj             *xp;
     cxobj            **xvec = NULL;
     size_t             xlen;
+    cxobj            **xpvec = NULL;
+    size_t             argc;
+    char             **argv = NULL;
 
     clicon_log(LOG_DEBUG, "grideye_agent: %s", __FUNCTION__);
     /* Invoke plugins */
@@ -955,20 +958,24 @@ echo_application_xml(cxobj         *xt,
 	if ((api = p->p_api) == NULL)
 	    continue; /* silently ignore */
 
-	/* XXX only single argument */
-	argstr = NULL;
-	if ((x = xpath_first(xp, "param")) != NULL)
-	    argstr = xml_body(x);
-
 	if (api->gp_test_fn != NULL) {
-
+	    if (xpath_vec(xp, "param", &xpvec, &argc) < 0)
+		goto done;
+	    if (argv != NULL)
+		free(argv);
+	    if ((argv = calloc(argc+1, sizeof(char*))) == NULL){
+		clicon_err(OE_UNIX, errno, "calloc");
+		goto done;
+	    }
+	    for (j=0; j<argc; j++)
+		argv[j] = xml_body(xpvec[j]);
 	    if (api->gp_magic == (GRIDEYE_PLUGIN_MAGIC & GRIDEYE_PLUGIN_PYTHON)) {
 		if ((str = grideye_call_method(api->gp_name,
 					       (char *)api->gp_test_fn,
-					       argstr)) == NULL)
+			       /* XXX */      argc?argv[0]:NULL)) == NULL)
 		    continue;
 	    } else {
-		if ((pret = api->gp_test_fn(argstr, &str)) < 0) {
+		if ((pret = api->gp_test_fn(argc, argv, &str)) < 0) {
 		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
 			       p->p_name, str?str:"");
 		    continue;
@@ -995,8 +1002,12 @@ echo_application_xml(cxobj         *xt,
     clicon_log(LOG_DEBUG, "grideye_agent: %s return:%s", __FUNCTION__, cbuf_get(cb));
     retval = 1; /* OK */
  done:
+    if (argv != NULL)
+	free(argv);
     if (xvec)
        free(xvec);
+    if (xpvec)
+       free(xpvec);
     if (v)
 	free(v);
     if (vi)
@@ -1151,7 +1162,7 @@ callhome_http(char               *url,
 /*!
  * @param[in]     url       URL - where to send http data to
  * @param[in]     name
- * @param[in]     cbmetr    Metric data from echo_application_xml
+ * @param[in]     cbmetr    Metric data from echo_application
  * @param[in]     timeout   Curl post request timeout in seconds
  * @param[in,out] natstate  0:none 1:enabled 2:addr&port defined 3: connected
  * @param[out]    interval  
@@ -1827,9 +1838,9 @@ main(int   argc,
 			clicon_err(OE_PLUGIN, errno, "cbuf_new");
 			goto done;
 		    }
-		    if ((retval = echo_application_xml(xtest,
-						       cb,
-						       plugins)) < 0)
+		    if ((retval = echo_application(xtest,
+						   cb,
+						   plugins)) < 0)
 			goto done;
 		    if (xtest){
 			xml_free(xtest);

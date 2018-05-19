@@ -60,7 +60,7 @@ typedef int (grideye_plugin_getopt_t)(const char *optname, char **value);
 typedef int (grideye_plugin_setopt_t)(const char *optname, char *value);
 
 /* Type of plugin test function */
-typedef int (grideye_plugin_test_t)(char *instr, char **outstr);
+typedef int (grideye_plugin_test_t)(int argc, char *argv[], char **outstr);
 
 #define GRIDEYE_PLUGIN_INPUT_FORMAT "xml"
 #define GRIDEYE_PLUGIN_OUTPUT_FORMAT "xml"
