@@ -1,3 +1,5 @@
+/* Pipeline for Grideye Agent */
+
 node {
      stage('Checkout') {
         git url: 'https://github.com/cloudmon360/grideye_agent.git'
