@@ -37,7 +37,7 @@ static char *_device = NULL;
 
 /* Forward */
 int iwget_exit(void);
-int iwget_test(char *instr, char **outstr);
+int iwget_test(int argc, char *argv[], char **outstr);
 int iwget_setopt(const char *optname, char *value);
 /*
  * This is the API declaration
@@ -110,7 +110,8 @@ stringadd(char  *p,
  * iwproto
  */
 int  
-iwget_test(char  *instr,
+iwget_test(int    argc,
+	   char  *argv[],
 	   char **outstr)
 {
     int             retval = -1;

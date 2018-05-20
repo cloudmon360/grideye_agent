@@ -18,7 +18,7 @@
 #include "grideye_plugin.h"
 
 /* Forward */
-int dhrystones_test(char *instr, char **outstr);
+int dhrystones_test(int argc, char *argv[], char **outstr);
 
 /*
  * This is the API declaration
@@ -38,8 +38,9 @@ static const struct grideye_plugin_api api = {
 extern int dhry_main(int Number_Of_Runs, int display); /* In dhry_1.c */
 
 int
-dhrystones_test(char      *instr,
-		char     **outstr)
+dhrystones_test(int    argc,
+		char  *argv[],
+		char **outstr)
 {
     int            retval = -1;
     struct timeval t0;
@@ -50,8 +51,8 @@ dhrystones_test(char      *instr,
     char          *str = NULL;
     int            dhrystones = 0;
 
-    if (instr != NULL)
-	dhrystones = atoi(instr);
+    if (argc > 0)
+	dhrystones = atoi(argv[0]);
     gettimeofday(&t0, NULL);
     if (dhry_main(dhrystones, 0) < 0)
 	goto done;

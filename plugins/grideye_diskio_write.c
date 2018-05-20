@@ -30,7 +30,7 @@ static char *_filename = NULL;
 
 /* Forward */
 int diskio_write_exit(void);
-int diskio_write_test(char *instr, char **outstr);
+int diskio_write_test(int argc, char *argv[], char **outstr);
 int diskio_write_setopt(const char *optname, char *value);
 
 /*
@@ -83,7 +83,8 @@ diskio_write_exit(void)
  * @param[out]  t_us  Latency in micro-seconds
  */
 int
-diskio_write_test(char      *instr,
+diskio_write_test(int        argc,
+		  char      *argv[],
 		  char     **outstr)
 {
     int            retval = -1;
@@ -97,8 +98,8 @@ diskio_write_test(char      *instr,
     size_t         slen;
     int            len = 0;
 
-    if (instr)
-	len = atoi(instr);
+    if (argc > 0)
+	len = atoi(argv[0]);
     if (len == 0){
 	retval = 0;
 	goto done;

@@ -32,7 +32,7 @@ static int64_t _filesize = 0;
 
 /* Forward */
 int diskio_write_rnd_exit(void);
-int diskio_write_rnd_test(char *instr, char **outstr);
+int diskio_write_rnd_test(int argc, char *argv[], char **outstr);
 int diskio_write_rnd_setopt(const char *optname, char *value);
 
 /*
@@ -65,8 +65,9 @@ diskio_write_rnd_exit(void)
  * @param[out]  str   XML result string
  */
 int
-diskio_write_rnd_test(char     *instr,
-		      char    **outstr)
+diskio_write_rnd_test(int    argc,
+		      char  *argv[],
+		      char **outstr)
 {
     int      retval = -1;
     int      fd;
@@ -82,8 +83,8 @@ diskio_write_rnd_test(char     *instr,
     size_t   slen;
     int      len = 0;
 
-    if (instr)
-	len = atoi(instr);
+    if (argc > 0)
+	len = atoi(argv[0]);
     if (len == 0){
 	retval = 0;
 	goto done;

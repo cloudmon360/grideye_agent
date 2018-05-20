@@ -29,7 +29,7 @@ static int debug = 0;
 static int _log = 0;
 
 /* Forward */
-int mem_read_test(char *instr, char **outstr);
+int mem_read_test(int argc, char *argv[], char **outstr);
 
 
 static const struct grideye_plugin_api api = {
@@ -47,8 +47,9 @@ static const struct grideye_plugin_api api = {
 long mem_read_test1(int logsize);
 
 int  
-mem_read_test(char    *instr, 
-	      char   **outstr)
+mem_read_test(int    argc,
+	      char  *argv[],
+	      char **outstr)
 {
     int             retval = -1;
     struct timeval  t0;

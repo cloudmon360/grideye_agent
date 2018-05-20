@@ -1113,36 +1113,36 @@ callhome_http(char               *url,
 	goto done;
 
     /* xml parse reply: here is where we get the port */
-	/* XXX KLUDGE TO SEE IF IT IS XML. ERROR COMES AS HTML 
-	 * In all cases, go back to callhome mode.
-	 * If HTML, then we cant use XML parser, since it is not properly formed.
-	 */
-	if (getdata[0] == '<'){
-	    if (strncmp(getdata,"<html", strlen("<html")) == 0){
-		clicon_log(LOG_WARNING,  "%s: Unexpected controller reply: %s", __FUNCTION__, getdata);
-	    }
-	    else if (xml_parse_string(getdata, NULL, &xreply) < 0)
-		clicon_log(LOG_WARNING,  "%s: xml parse error: %s", __FUNCTION__, getdata);
-	    else
-		clicon_log(LOG_WARNING,  "%s: Unexpected controller reply: %s", __FUNCTION__, getdata);
-	    *natstate = 0;
-	    goto ok;
+    /* XXX KLUDGE TO SEE IF IT IS XML. ERROR COMES AS HTML 
+     * In all cases, go back to callhome mode.
+     * If HTML, then we cant use XML parser, since it is not properly formed.
+     */
+    if (getdata[0] == '<'){
+	if (strncmp(getdata,"<html", strlen("<html")) == 0){
+	    clicon_log(LOG_WARNING,  "%s: Unexpected controller reply: %s", __FUNCTION__, getdata);
 	}
-	if (json_parse_str(getdata, &xreply) < 0){
-	    clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
-	    *natstate = 0;
-	    goto ok;
-	}
-	/* If not regular output, it is an error*/
-	if (xpath_first(xreply, "output") == NULL){
-	    if ((x = xpath_first(xreply, "//error-message")) != NULL)
-		err = xml_body(x);
-	    if ((x = xpath_first(xreply, "//error-tag")) != NULL)
-		clicon_log(LOG_WARNING,  "%s: error: %s: %s", __FUNCTION__, xml_body(x), err?err:"");
-	    *natstate = 0;
-	    goto ok;
-	}
-	*natstate = 2;
+	else if (xml_parse_string(getdata, NULL, &xreply) < 0)
+	    clicon_log(LOG_WARNING,  "%s: xml parse error: %s", __FUNCTION__, getdata);
+	else
+	    clicon_log(LOG_WARNING,  "%s: Unexpected controller reply: %s", __FUNCTION__, getdata);
+	*natstate = 0;
+	goto ok;
+    }
+    if (json_parse_str(getdata, &xreply) < 0){
+	clicon_log(LOG_WARNING,  "%s: json parse error: %s", __FUNCTION__, getdata);
+	*natstate = 0;
+	goto ok;
+    }
+    /* If not regular output, it is an error*/
+    if (xpath_first(xreply, "output") == NULL){
+	if ((x = xpath_first(xreply, "//error-message")) != NULL)
+	    err = xml_body(x);
+	if ((x = xpath_first(xreply, "//error-tag")) != NULL)
+	    clicon_log(LOG_WARNING,  "%s: error: %s: %s", __FUNCTION__, xml_body(x), err?err:"");
+	*natstate = 0;
+	goto ok;
+    }
+    *natstate = 2;
  ok:
     retval = 0;
  done:

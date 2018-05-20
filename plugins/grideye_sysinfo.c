@@ -24,7 +24,7 @@
 #define BUF_MAX 1024
 
 /* Forward */
-int sysinfo_test(char *instr, char **outstr);
+int sysinfo_test(int argc, char *argv[], char **outstr);
 int sysinfo_getopt(const char *optname, char **value);
 
 /*
@@ -139,8 +139,9 @@ get_cpu_load(int cpu)
  * iwproto
  */
 int
-sysinfo_test(char      *instr,
-	     char     **outstr)
+sysinfo_test(int    argc,
+	     char  *argv[],
+	     char **outstr)
 {
     int             retval = -1;
     struct sysinfo  info;

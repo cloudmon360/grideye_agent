@@ -44,7 +44,7 @@ static char *_device = NULL;
 
 /* Forward */
 int airport_exit(void);
-int airport_test(char *instr, char **outstr);
+int airport_test(int argc, char *argv[], char **outstr);
 
 /*
  * This is the API declaration
@@ -129,7 +129,8 @@ find_key(char **argv,
  * The string contains the following parameters (or possibly a subset):
  */
 int  
-airport_test(char  *instr,
+airport_test(int    argc0,
+	     char  *argv0[],
 	     char **outstr)
 {
     int         retval = -1;
