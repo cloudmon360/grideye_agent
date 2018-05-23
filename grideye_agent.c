@@ -102,12 +102,12 @@ extern const char GRIDEYE_VERSION[];
 #define CALLHOME_DEFAULT  20 /* seconds */
 
 /* CURL post timeout - wait for remote end to answer in seconds */
-#define CURL_TIMEOUT_DEFAULT 60 
+#define CURL_TIMEOUT_DEFAULT 60
 
 /* Wireless file to read status from */
 #define PROC_NET_WIRELESS "/proc/net/wireless"
 
-/* Run with american fuzzy lop http://lcamtuf.coredump.cx/afl 
+/* Run with american fuzzy lop http://lcamtuf.coredump.cx/afl
  * Only runs with -p http and replaces curl with stdin/stdout
  */
 #undef FUZZ
@@ -259,14 +259,16 @@ fail:
 static char
 *grideye_call_method(char *name,
 		     char *method,
-		     char *argstr)
+		     int argc,
+		     char **argv)
 {
     PyObject *pymethod;
-    PyObject *pyargs;
-    PyObject *pyvalue;
-    PyObject *pyretval;
+    PyObject *args;
+    PyObject **value;
+    PyObject *retval;
     PyObject *pyname;
-    PyObject *pymodule;
+    PyObject *module;
+    PyObject *list = PyList_New(argc);
 
     char     *outstr;
     char     *syscmd = NULL;
@@ -274,9 +276,7 @@ static char
 
     int      modulelen = 0;
     int      syscmdlen = 0;
-
-    if (argstr == NULL)
-	    argstr = "";
+    int      i = 0;
 
     if ((modulelen = snprintf(NULL, 0, "grideye_%s", name)) <= 0)
 	goto fail;
@@ -314,11 +314,11 @@ static char
 	free(syscmd);
 
     pyname = PyUnicode_DecodeFSDefault(modulename);
-    pymodule = PyImport_Import(pyname);
+    module = PyImport_Import(pyname);
 
     Py_DECREF(pyname);
 
-    if (pymodule == NULL) {
+    if (module == NULL) {
 	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, method);
 	goto fail;
     }
@@ -326,35 +326,36 @@ static char
     if (modulename)
 	free(modulename);
 
-    pymethod = PyObject_GetAttrString(pymodule, method);
+    pymethod = PyObject_GetAttrString(module, method);
     if (!pymethod || !PyCallable_Check(pymethod)) {
 	clicon_log(LOG_ERR, "Method %s is not callable", PLUGIN_INIT_FN);
 	goto fail;
     }
 
-    Py_DECREF(pymodule);
+    Py_DECREF(module);
 
-    pyargs = PyTuple_New(1);
-    pyvalue = PyBytes_FromString(argstr);
+    args = PyTuple_New(1);
 
-    PyTuple_SetItem(pyargs, 0, pyvalue);
-
-    Py_DECREF(pyvalue);
-
-    if ((pyretval = PyObject_CallObject(pymethod, pyargs)) == NULL) {
-	goto fail;
+    for(i = 0; i < argc; i++) {
+	value = PyBytes_FromString(argv[i]);
+	PyList_SetItem(list, i, value);
     }
 
-    Py_DECREF(pyargs);
+    PyObject *arglist = Py_BuildValue("(O)", list);
+
+    if ((retval = PyObject_CallObject(pymethod, arglist)) == NULL) {
+	    goto fail;
+    }
+
+    Py_DECREF(args);
     Py_DECREF(pymethod);
 
-    if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 1) {
-	goto fail;
-    }
+    if (retval != NULL)
+	outstr = strdup(grideye_pyobj_to_char(retval));
+    else
+	outstr = NULL;
 
-    outstr = strdup(grideye_pyobj_to_char(PyList_GetItem(pyretval, 0)));
-
-    Py_DECREF(pyretval);
+    Py_DECREF(retval);
 
     // Py_Finalize();
 
@@ -972,7 +973,8 @@ echo_application(cxobj         *xt,
 	    if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
 		if ((str = grideye_call_method(api->gp_name,
 					       (char *)api->gp_test_fn,
-					       /* XXX */      argc?argv[0]:NULL)) == NULL)
+					       argc,
+					       argv)) == NULL)
 		    continue;
 	    } else {
 		if ((pret = api->gp_test_fn(argc, argv, &str)) < 0) {
@@ -1165,7 +1167,7 @@ callhome_http(char               *url,
  * @param[in]     cbmetr    Metric data from echo_application
  * @param[in]     timeout   Curl post request timeout in seconds
  * @param[in,out] natstate  0:none 1:enabled 2:addr&port defined 3: connected
- * @param[out]    interval  
+ * @param[out]    interval
  * @param[out]    xplugin   This is test initiator received from the controller
  */
 static int
@@ -1681,7 +1683,7 @@ main(int   argc,
 	goto done;
     snprintf(diskio_writefile, slen+1, "%s/%s", diskio_dir,
 	     DISKIO_WRITEFILE);
-    
+
     if ((slen = snprintf(NULL, 0, "%s/%s", diskio_dir,
 			 DISKIO_LARGEFILE)) <= 0)
 	goto done;
@@ -1701,7 +1703,8 @@ main(int   argc,
 	    if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
 		if ((yangmetric = grideye_call_method(api->gp_name,
 						      (char *)api->gp_getopt_fn,
-						      "yangmetric")) == NULL) {
+						      0,
+						      NULL)) == NULL) {
 		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
 		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
 			       p->p_name, strerror(errno));
