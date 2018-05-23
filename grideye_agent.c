@@ -263,12 +263,12 @@ static char
 		     char **argv)
 {
     PyObject *pymethod;
-    PyObject *args;
     PyObject **value;
     PyObject *retval;
     PyObject *pyname;
     PyObject *module;
-    PyObject *list = PyList_New(argc);
+    PyObject *list;
+    PyObject *arglist;
 
     char     *outstr;
     char     *syscmd = NULL;
@@ -327,27 +327,30 @@ static char
 	free(modulename);
 
     pymethod = PyObject_GetAttrString(module, method);
-    if (!pymethod || !PyCallable_Check(pymethod)) {
+
+    if (pymethod == NULL || !PyCallable_Check(pymethod)) {
 	clicon_log(LOG_ERR, "Method %s is not callable", PLUGIN_INIT_FN);
 	goto fail;
     }
 
     Py_DECREF(module);
 
-    args = PyTuple_New(1);
+    if ((list = PyList_New(argc)) == NULL)
+	goto fail;
 
+    /* Iterate through all parameters and add them to the list */
     for(i = 0; i < argc; i++) {
 	value = PyBytes_FromString(argv[i]);
 	PyList_SetItem(list, i, value);
     }
 
-    PyObject *arglist = Py_BuildValue("(O)", list);
+    if ((arglist = Py_BuildValue("(O)", list)) == NULL)
+	goto fail;
 
     if ((retval = PyObject_CallObject(pymethod, arglist)) == NULL) {
-	    goto fail;
+	goto fail;
     }
 
-    Py_DECREF(args);
     Py_DECREF(pymethod);
 
     if (retval != NULL)
@@ -357,7 +360,12 @@ static char
 
     Py_DECREF(retval);
 
-    // Py_Finalize();
+    /* Known bug, Py_Finalize() sometimes makes things crash, don't
+       use it for now */
+
+#if 0
+    Py_Finalize();
+#endif /* 0 */
 
     return outstr;
 
@@ -386,11 +394,11 @@ grideye_plugin_load_py(void *handle,
 
     // Python objects
     PyObject                  *pyname;
-    PyObject                  *pymodule;
-    PyObject                  *pyvalue;
-    PyObject                  *pyfunc;
+    PyObject                  *module;
+    PyObject                  *value;
+    PyObject                  *func;
     PyObject                  *pyretval;
-    PyObject                  *pyargs;
+    PyObject                  *args;
 
     int                       gp_version = 0;
     int                       gp_magic = 0;
@@ -425,9 +433,9 @@ grideye_plugin_load_py(void *handle,
     if (syscmd)
 	free(syscmd);
 
-    pyname = PyUnicode_DecodeFSDefault(modulename);
+    name = PyUnicode_DecodeFSDefault(modulename);
 
-    if ((pymodule = PyImport_Import(pyname)) == NULL) {
+    if ((module = PyImport_Import(name)) == NULL) {
 	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, PLUGIN_INIT_FN);
 	goto fail;
     }
@@ -435,29 +443,29 @@ grideye_plugin_load_py(void *handle,
     if (modulename)
 	free(modulename);
 
-    Py_DECREF(pyname);
+    Py_DECREF(name);
 
-    pyfunc = PyObject_GetAttrString(pymodule, PLUGIN_INIT_FN);
-    if (!pyfunc || !PyCallable_Check(pyfunc)) {
+    func = PyObject_GetAttrString(module, PLUGIN_INIT_FN);
+    if (func == NULL || !PyCallable_Check(func)) {
 		clicon_log(LOG_ERR,
 			   "Function %s is not callable",
 			   PLUGIN_INIT_FN);
 		goto fail;
     }
 
-    Py_DECREF(pymodule);
+    Py_DECREF(module);
 
-    pyargs = PyTuple_New(1);
-    pyvalue = PyLong_FromLong(GRIDEYE_PLUGIN_VERSION);
+    args = PyTuple_New(1);
+    value = PyLong_FromLong(GRIDEYE_PLUGIN_VERSION);
 
-    PyTuple_SetItem(pyargs, 0, pyvalue);
+    PyTuple_SetItem(args, 0, value);
 
-    Py_DECREF(pyvalue);
+    Py_DECREF(value);
 
-    if ((pyretval = PyObject_CallObject(pyfunc, pyargs)) == NULL)
+    if ((pyretval = PyObject_CallObject(func, args)) == NULL)
 		goto fail;
 
-    Py_DECREF(pyargs);
+    Py_DECREF(args);
 
     if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 9) {
 		goto fail;
