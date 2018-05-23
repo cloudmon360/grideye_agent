@@ -60,7 +60,7 @@ http_test(int    argc,
     double time;
     char  *str = NULL;
     size_t slen;
-    char   *host;
+    char   *host = NULL;
     
     if (argc > 0)
 	host = argv[0];
