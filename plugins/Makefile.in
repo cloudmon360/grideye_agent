@@ -33,7 +33,7 @@ HOST_VENDOR     = @host_vendor@
 plugindir	= $(DESTDIR)@GRIDEYE_PLUGIN_DIR@
 
 CC	= @CC@
-CFLAGS  = -O2 -Wall -rdynamic -fPIC # Dynamic linking
+CFLAGS  = -O2 -Wall -Werror -rdynamic -fPIC # Dynamic linking
 CFLAGS += -D_NOMAIN # Disable unit test main in .c files
 CFLAGS += -DPLUGINDIR=$(plugindir)
 CFLAGS += @DEFS@

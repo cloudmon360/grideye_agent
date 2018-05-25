@@ -24,7 +24,7 @@
 
 
 /* Forward */
-int http_test(char *instr, char **outstr);
+int http_test(int argc, char *argv[], char **outstr);
 
 /*
  * This is the API declaration
@@ -48,8 +48,9 @@ HTTP OK: HTTP/1.1 200 OK - 518853 bytes in 1.418 second response time |time=1.41
 
  */
 int  
-http_test(char      *instr,
-	  char     **outstr)
+http_test(int    argc,
+	  char  *argv[],
+	  char **outstr)
 {
     int    retval = -1;
     char   buf[1024] = {0,};
@@ -59,8 +60,10 @@ http_test(char      *instr,
     double time;
     char  *str = NULL;
     size_t slen;
-    char   *host = instr;
+    char   *host = NULL;
     
+    if (argc > 0)
+	host = argv[0];
     if (host == NULL){
 	*outstr = strdup("No parameter");
 	goto done;

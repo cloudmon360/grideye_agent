@@ -34,7 +34,7 @@ static int64_t _filesize = 0;
 
 /* Forward */
 int diskio_read_exit(void);
-int diskio_read_test(char *instr, char **outstr);
+int diskio_read_test(int argc, char *argv[], char **outstr);
 int diskio_read_setopt(const char *optname, char *value);
 
 /*
@@ -66,8 +66,9 @@ diskio_read_exit(void)
  * @param[out]  t_us  Latency in micro-seconds
  */
 int
-diskio_read_test(char     *instr,
-                 char    **outstr)
+diskio_read_test(int     argc,
+		 char   *argv[],
+                 char  **outstr)
 {                                                                      
     int      retval = -1;
     int      fd;
@@ -84,8 +85,8 @@ diskio_read_test(char     *instr,
     size_t   slen;
     int      len = 0;
 
-    if (instr)
-	len = atoi(instr);
+    if (argc > 0)
+	len = atoi(argv[0]);
     if (len == 0){
 	retval = 0;
 	goto done;

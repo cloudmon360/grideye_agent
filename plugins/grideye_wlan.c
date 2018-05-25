@@ -27,7 +27,7 @@ static char *_device = NULL;
 
 /* Forward */
 int wlan_exit(void);
-int wlan_test(char *instr, char **outstr);
+int wlan_test(int argc, char *argv[], char **outstr);
 int wlan_setopt(const char *optname, char *value);
 
 /*
@@ -63,8 +63,9 @@ wlan_exit(void)
  *  q_noise Wireless noise level
  */
 int  
-wlan_test(char     *instr,
-	  char    **outstr)
+wlan_test(int    argc,
+	  char  *argv[],
+	  char **outstr)
 {
     int             retval = -1;
     FILE           *f = NULL;
