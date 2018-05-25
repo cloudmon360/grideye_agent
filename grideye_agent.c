@@ -263,7 +263,7 @@ static char
 		     char **argv)
 {
     PyObject *pymethod;
-    PyObject **value;
+    PyObject *value;
     PyObject *retval;
     PyObject *pyname;
     PyObject *module;
@@ -433,9 +433,9 @@ grideye_plugin_load_py(void *handle,
     if (syscmd)
 	free(syscmd);
 
-    name = PyUnicode_DecodeFSDefault(modulename);
+    pyname = PyUnicode_DecodeFSDefault(modulename);
 
-    if ((module = PyImport_Import(name)) == NULL) {
+    if ((module = PyImport_Import(pyname)) == NULL) {
 	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, PLUGIN_INIT_FN);
 	goto fail;
     }
@@ -443,7 +443,7 @@ grideye_plugin_load_py(void *handle,
     if (modulename)
 	free(modulename);
 
-    Py_DECREF(name);
+    Py_DECREF(pyname);
 
     func = PyObject_GetAttrString(module, PLUGIN_INIT_FN);
     if (func == NULL || !PyCallable_Check(func)) {
