@@ -353,6 +353,11 @@ static char
 
     Py_DECREF(pymethod);
 
+    if (strcmp((char *)Py_TYPE(retval), "str") != 0) {
+        clicon_log(LOG_NOTICE, "grideye_agent: Plugin is supposed to return a string");
+	goto fail;
+    }
+
     if (retval != NULL)
 	outstr = strdup(grideye_pyobj_to_char(retval));
     else
