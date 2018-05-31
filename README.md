@@ -133,7 +133,14 @@ such as:
 
 The three metrics: htime, hsize, hstatus need to be defined in the
 Grideye YANG model, so that the Grideye controller can interpret them.
-These entries are added to the grideye YANG model as follows:
+
+There are two ways to do this, either the new metrics are defined
+directly in the file on the controller which describes then YANG
+model. Or new metrics can be registered directly from the plugin.
+
+
+These entries are added to the grideye YANG model on the controller as
+follows:
 
 ```
    module grideye-result {
@@ -163,6 +170,41 @@ be used as event (if changed). Note also that htime has been defined
 in milliseconds to avoid floating point numbers. Floats can be used but are more complex to handle.
 
 If the YANG model is changed, the grideye *controller* is restarted.
+
+The other way is to register the new metric in teh YANG model from the
+plugin. This is done using the getopt function which is called on when
+the plugin is loaded.
+
+To register a new metric named hsize:
+
+...
+    int http_getopt(const char *optname,
+	            char      **value)
+    {
+        if (strcmp(optname, "yangmetric"))
+            return 0;
+        if ((*value = strdup("{\"metrics\":{\"name\":\"hsize\",\"description\":\"HTTP response size\",\"type\":\"int32\"}}")) == NULL)
+            return -1;
+        return 0;
+    }
+...
+
+And in the struct describing the plugin we set the getopt field to the
+function above:
+
+...
+    static const struct grideye_plugin_api api = {
+        2,
+        GRIDEYE_PLUGIN_MAGIC,
+        "sysinfo",
+        "json",        /* input format */
+        "xml",         /* output format */
+        http_getopt,   /* getopt yangmetrics */
+        NULL,
+        http_test,     /* actual test */
+        NULL
+    };
+...
 
 Note that there already exists a large number of metrics and you can
 most likely use already existing metrics.
