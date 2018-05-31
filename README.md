@@ -177,22 +177,22 @@ the plugin is loaded.
 
 To register a new metric named hsize:
 
-...
+```
     int http_getopt(const char *optname,
 	            char      **value)
-    {
+		    {
         if (strcmp(optname, "yangmetric"))
             return 0;
         if ((*value = strdup("{\"metrics\":{\"name\":\"hsize\",\"description\":\"HTTP response size\",\"type\":\"int32\"}}")) == NULL)
             return -1;
         return 0;
     }
-...
+```
 
 And in the struct describing the plugin we set the getopt field to the
 function above:
 
-...
+```
     static const struct grideye_plugin_api api = {
         2,
         GRIDEYE_PLUGIN_MAGIC,
@@ -204,7 +204,7 @@ function above:
         http_test,     /* actual test */
         NULL
     };
-...
+```
 
 Note that there already exists a large number of metrics and you can
 most likely use already existing metrics.
