@@ -1834,7 +1834,7 @@ main(int   argc,
 
 	/* Check sockets */
 	if (natstate != 2){
-	    interval = CALLHOME_DEFAULT;
+	    interval = CALLHOME_DEFAULT*1000; /* interval in ms */
 #ifdef FUZZ
 	    if (fuzz)
 		interval = 1;
