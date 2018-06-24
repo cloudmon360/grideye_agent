@@ -16,6 +16,8 @@
 
 #include "grideye_plugin.h"
 
+int
+iperf_getopt(const char *optname, char **value);
 int iperf_client_test(int argc, char *argv[], char **outstr);
 int iperf_results_parse(char *result, float *sent_bytes, float *sent_bps,
 			float *recv_bytes,
@@ -27,11 +29,27 @@ static const struct grideye_plugin_api api = {
     "http",
     "str",         /* input format */
     "xml",         /* output format */
-    NULL,
+    iperf_getopt,
     NULL,
     iperf_client_test,      /* actual test */
     NULL
 };
+
+int
+iperf_getopt(const char *optname, 
+	       char      **value)
+{
+    if (strcmp(optname, "yangmetric"))
+	return 0;
+    if ((*value = strdup("{\"metrics\":"
+			 "{\"name\":\"iperf_sent_bytes\",\"description\":\"iperf bytes sent\", \"type\":\"decimal64-6\",\"units\":\"bytes\"},"
+			 "{\"name\":\"iperf_sent_bps\",\"description\":\"iperf bits per second sent\", \"type\":\"decimal64-6\",\"units\":\"bytes\"},"
+			 "{\"name\":\"iperf_recv_bytes\",\"description\":\"iperf bytes recv\", \"type\":\"decimal64-6\",\"units\":\"bytes\"},"
+			 "{\"name\":\"iperf_recv_bps\",\"description\":\"iperf bits per second recv\", \"type\":\"decimal64-6\",\"units\":\"bytes\"}"
+			 "}")) == NULL)
+	return -1;
+    return 0;
+}
 
 int iperf_results_parse(char *result, float *sent_bytes, float *sent_bps,
 			float *recv_bytes,
