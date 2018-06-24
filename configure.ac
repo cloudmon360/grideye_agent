@@ -75,6 +75,9 @@ AC_CHECK_LIB(cligen, cligen_init,, AC_MSG_ERROR(cligen missing. Try: git clone h
 AC_CHECK_HEADERS(clixon/clixon.h,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), [[ #include <cligen/cligen.h> ]])
 AC_SEARCH_LIBS(clicon_handle_init, clixon,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), -lcligen)
 
+# Check for iperf
+AC_SEARCH_LIBS(iperf_run_client, iperf,, AC_MSG_ERROR(iperf missing. Try installing iperf-dev), -liperf)
+
 AC_PROG_CC()
 AC_PROG_CPP
 AC_PROG_INSTALL
@@ -126,7 +129,7 @@ echo "GRIDEYE_PLUGIN_DIR: $GRIDEYE_PLUGIN_DIR"
 # Check Python3
 
 echo Checking for python
-
+ 
 PYINCLUDES=`python3-config --includes | awk '{print $2}' | sed 's/-I//'`
 AC_CHECK_HEADER($PYINCLUDES/Python.h,, AC_MSG_ERROR(Python.h missing. Try: apt-get install python3-dev libpython3-dev on Debian based systems))
 
@@ -136,7 +139,7 @@ if test -z "$PATHPYCONF" ; then
 fi
 
 CFLAGS+=" `$PATHPYCONF --includes`"
-LDFLAGS+=" `$PATHPYCONF --libs`"
+LDFLAGS+=" `$PATHPYCONF --libs` -liperf"
 
 AC_OUTPUT(
 	Makefile
