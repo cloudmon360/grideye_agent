@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y \
     libfcgi-dev \
     python3-dev \
     libpython3-dev \
-    sysstat
+    sysstat \
+    libiperf-dev
 
 # Create a directory to hold source-code, dependencies etc
 RUN mkdir /grideye
