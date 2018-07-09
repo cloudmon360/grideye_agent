@@ -102,6 +102,7 @@ get_cpu_load(int cpu)
     char buffer[1024];
     char command[128];
     float usr = 0;
+    float guest = 0;
 
     if (cpu == -1) {
 	sprintf(command, "mpstat 1 1");
@@ -118,14 +119,16 @@ get_cpu_load(int cpu)
     }
 
     while (fgets(buffer, sizeof(buffer)-1, fp) != NULL) {
-	if (cpu != -1)
-	    sscanf(buffer, "Average:\t%*d\t%f", &usr);
-	else
-	    sscanf(buffer, "Average:\tall\t%f", &usr);
+	    if (cpu != -1)
+		    sscanf(buffer, "Average:\t%*d\t%f\t%*f\t%*f\t%*f\t%*f\t%*f\t%*f\t%f", &usr, &guest);
+	    else
+		    sscanf(buffer, "Average:\tall\t%f\t%*f\t%*f\t%*f\t%*f\t%*f\t%*f\t%f", &usr, &guest);
     }
 
     pclose(fp);
 
+    if (guest > usr)
+	    return guest;
     return usr;
 }
 
