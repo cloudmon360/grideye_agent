@@ -126,7 +126,9 @@ The last thing the test function should do is to return either an XML or an
 JSON string which holds the results of the tests that have been performed. A
 result in XML can look like this:
 
+```
 <hstatus>200</hstatus><htime>80</htime><hsize>322</hsize>
+```
 
 This will then be sent to the controller which maps it towards registered metrics and
 uses it to present result data.
