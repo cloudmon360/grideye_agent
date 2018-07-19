@@ -68,15 +68,16 @@ Grideye_agent contains an open plugin interface.  Several plugins
 are included in this release. Other authors have (and can) contribute
 to the plugins. 
 
-The following steps illustrate how to add the Nagios
-(*check_http*)[https://www.monitoring-plugins.org/doc/man/check_http.html]
-test plugin and how to incorporate it to produce input to grideye.
-There are lots of Nagios plugins making it an easy way to extend
-Grideye.
+The following steps will briefly explain how to implement new plugins
+for the Grideye Agent.
+
+The file plugins/grideye_http.c is a good example which shows how to
+implement a plugin which does a HTTP connection test towards a URL by
+launching CURL as an external process.
 
 ### 3.1 The API
 
-A grideye plugin is a dynamically loaded plugin written in C. You
+A grideye plugin is a dynamically loaded plugin written in C or Python. You
 write a file with a couple of functions, compile it, place it in a
 directory, and restart grideye_agent.
 
@@ -90,56 +91,58 @@ Symbol | Type | Mandatory |Description
 gp_version | Variable | Yes | Must be 2
 gp_magic | Variable | Yes | Must be 0x3f687f03
 gp_name | Variable | Yes | Name of plugin
-gp_input_formar | Variable | No | Test input parameter format
-gp_output_formar | Variable | No | Test output parameter format
+gp_input_format | Variable | No | Test input parameter format
+gp_output_format | Variable | No | Test output parameter format
 gp_getopt_fn | Function | No | Generic function for getting plugin info
 gp_setopt_fn | Function | No | Generic function for setting plugin info
 gp_test_fn | Function | Yes | The actual test function with input and output parameters.
 gp_exit_fn | Function | No | An exit function
 
-gp_output | Variable | Yes | Format of output. Only "xml" supported
+### 3.2 Input parameters
 
-### 3.2 Identifying the input: parameters
+Parameters can be passed from the controller down to the plugins. Since one might want
+to pass multiple parameters the plugins supoort using an array of input parameters. When
+defining the test function mentioned above the declaration should look something like this:
 
-check_http has lots of parameters. You can hardcode most, or leave as
-defaults.
+int http_test(int argc, char *argv[], char **outstr)
 
-```
-   check_http -H www.youtube.com -S
-   HTTP OK: HTTP/1.1 200 OK - 495051 bytes in 1.751 second response time |
-   time=1.751042s;;;0.000000 size=495051B;;;0
-```
+Above we have a variable (argc) which holds the number of parameters stored
+in the parameter array argv. If three parameters are configured in the controller for a plugin
+the array outstr will contain three entries with one parameter per entry.
 
-In this example, the *host* parameter is chosen as dynamically
-configurable, which means it can dynamically change in a Grideye testcase.
+These parameters can the be used in the test function in order to for example make a HTTP connection
+test towards a specific URL.
 
-This means 'gp_input=host' is defined in the plugin and gp_test_fn is called with 'host' as input parameter, example:
+### 3.3 Output parameters
 
-```
-   gp_test_fn("www.youtube.com")
-```
+Output parameters are used to send measurement data back to the controller.
+These parameters can be either XML och JSON and should correspond to the YANG
+models which are representing the different metrics available. 
 
-### 3.3 Identifying the output: metrics
+The section below describes how to create metrics for a HTTP connection test,
+the test contains three different metrics: hstatus, hsize and htime.
 
-check_http has several outputs, such as the status (200 OK), size and
-latency. The test function is written so that it outputs an XML string
-such as:
+The last thing the test function should do is to return either an XML or an
+JSON string which holds the results of the tests that have been performed. A
+result in XML can look like this:
 
-```
-   <htime>1751</htime><hsize>495051</hsize><hstatus>200 OK</hstatus>
-```
+<hstatus>200</hstatus><htime>80</htime><hsize>322</hsize>
 
-### 3.4 Defining metrics in YANG
+This will then be sent to the controller which maps it towards registered metrics and
+uses it to present result data.
 
-The three metrics: htime, hsize, hstatus need to be defined in the
-Grideye YANG model, so that the Grideye controller can interpret them.
+### 3.4 Defining metrics using YANG models
+
+Any metrics used must be defined in a YANG model in order to make
+the controller recognise them.
 
 There are two ways to do this, either the new metrics are defined
 directly in the file on the controller which describes then YANG
-model. Or new metrics can be registered directly from the plugin.
+model. The other, better way to do it, is to register any metrics 
+directly from the plugins.
 
-
-These entries are added to the grideye YANG model on the controller as
+The first way is to add new metrics directly on the controller. These 
+new metrics are added to the grideye YANG file on the controller as
 follows:
 
 ```
@@ -167,11 +170,12 @@ follows:
 
 Note that hstatus is string, and therefore cannot be plotted, but can
 be used as event (if changed). Note also that htime has been defined
-in milliseconds to avoid floating point numbers. Floats can be used but are more complex to handle.
+in milliseconds to avoid floating point numbers. Floats can be used but 
+are more complex to handle.
 
 If the YANG model is changed, the grideye *controller* is restarted.
 
-The other way is to register the new metric in teh YANG model from the
+The other way is to register the new metric in the YANG model from the
 plugin. This is done using the getopt function which is called on when
 the plugin is loaded.
 
