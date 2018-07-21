@@ -57,7 +57,7 @@ CLIgen and CLIXON:
     cd cligen; configure; make; sudo make install
     git clone https://github.com/clicon/clixon.git
        cd clixon; 
-       configure --without-restconf --without-keyvalue; 
+       configure --without-restconf;
        make; 
        sudo make install; 
        sudo make install-include
