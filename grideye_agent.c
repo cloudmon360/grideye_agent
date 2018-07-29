@@ -625,10 +625,8 @@ plugin_load_dir(char          *dir,
 {
     int            retval = -1;
     DIR           *dirp = NULL;
-    struct dirent  dent;
-    struct dirent *dresp;
+    struct dirent  *dent;
     void          *handle = NULL;
-    int            res;
     char          *name;
     int            off_so;
     int            off_py;
@@ -642,19 +640,15 @@ plugin_load_dir(char          *dir,
 		    dir);
 	goto done;
     }
+
     /*
      * dirent->d_name is name of directory entry, if dresp is NULL the iteration
      * is done
      */
-   for (res = readdir_r(dirp, &dent, &dresp);
-	dresp;
-	res = readdir_r (dirp, &dent, &dresp)){
-       if (res != 0) {
-	   clicon_err(OE_UNIX, errno, "readdir");
-	   goto done;
-       }
+    while ((dent = readdir(dirp)) != NULL) {
+
        /* match .so */
-       name = dent.d_name;
+       name = dent->d_name;
        off_so = strlen(name)-5;
        off_py = strlen(name) - 3;
 
