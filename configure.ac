@@ -66,10 +66,25 @@ AC_SUBST(INCLUDES)
 AC_SUBST(CPPFLAGS)
 AC_SUBST(LIBS)
 
+AC_ARG_WITH(cligen,  [  --with-cligen=dir       Use CLIGEN here ] )
+if test "${with_cligen}"; then
+  echo "Using CLIGEN here: ${with_cligen}"
+  CPPFLAGS="-I${with_cligen}/include ${CPPFLAGS}"
+  LDFLAGS="-L${with_cligen}/lib ${LDFLAGS}"
+  test -d "$with_cligen" && CLIGEN_PREFIX="$with_cligen"
+fi
+
 # Check for cligen
 AC_CHECK_HEADERS(cligen/cligen.h,, AC_MSG_ERROR(cligen missing. Try: git clone https://github.com/olofhagsand/cligen.git))
 AC_CHECK_LIB(cligen, cligen_init,, AC_MSG_ERROR(cligen missing. Try: git clone https://github.com/olofhagsand/cligen.git))
 
+AC_ARG_WITH(clixon,  [  --with-clixon=dir       Use CLIXON here ] )
+if test "${with_clixon}"; then
+  echo "Using CLIXON here: ${with_clixon}"
+  CPPFLAGS="-I${with_clixon}/include ${CPPFLAGS}"
+  LDFLAGS="-L${with_clixon}/lib ${LDFLAGS}"
+  test -d "$with_clixon" && CLIXON_PREFIX="$with_clixon"
+fi
 
 # Check for clixon
 AC_CHECK_HEADERS(clixon/clixon.h,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), [[ #include <cligen/cligen.h> ]])
