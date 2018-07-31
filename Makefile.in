@@ -31,7 +31,7 @@ includedir	= @includedir@
 HOST_VENDOR     = @host_vendor@
 
 CC	= @CC@
-CFLAGS  = @CFLAGS@  @DEFS@ -D_NOMAIN -fPIC
+CFLAGS  = @CFLAGS@ @DEFS@ -D_NOMAIN -fPIC
 LDFLAGS = @LDFLAGS@
 LIBS    = @LIBS@
 INCLUDES  = -I.
@@ -91,7 +91,7 @@ $(MYLIB) : $(LIBOBJS)
 ifeq ($(HOST_VENDOR),apple)
 	$(CC) -shared  -undefined dynamic_lookup -o $@ $(LIBOBJS) $(LIBS)
 else
-	$(CC) -shared -o $@ $(LIBOBJS) -Wl,-soname=$(MYLIB) $(LIBS)
+	$(CC) -shared -o $@ $(LIBOBJS) -Wl,-soname=$(MYLIB) $(LIBS) $(LDFLAGS)
 endif
 
 # link-name is needed for application linking
@@ -150,7 +150,7 @@ TAGS:
 	find $(srcdir) -name '*.[chyl]' | etags -
 
 depend:
-	$(CC) $(DEPENDFLAGS) @DEFS@ $(INCLUDES) $(CFLAGS) -MM $(SRC) $(LIBSRC) > .depend
+	$(CC) $(DEPENDFLAGS) @DEFS@ $(INCLUDES) $(CFLAGS) $(CPPFLAGS) -MM $(SRC) $(LIBSRC) > .depend
 	for i in $(SUBDIRS); \
 	do (cd $$i; $(MAKE) $(MFLAGS) $@); done
 
