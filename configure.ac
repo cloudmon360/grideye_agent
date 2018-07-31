@@ -66,6 +66,7 @@ AC_SUBST(INCLUDES)
 AC_SUBST(CPPFLAGS)
 AC_SUBST(LIBS)
 
+# This is for cligen
 AC_ARG_WITH(cligen,  [  --with-cligen=dir       Use CLIGEN here ] )
 if test "${with_cligen}"; then
   echo "Using CLIGEN here: ${with_cligen}"
@@ -78,14 +79,6 @@ fi
 AC_CHECK_HEADERS(cligen/cligen.h,, AC_MSG_ERROR(cligen missing. Try: git clone https://github.com/olofhagsand/cligen.git))
 AC_CHECK_LIB(cligen, cligen_init,, AC_MSG_ERROR(cligen missing. Try: git clone https://github.com/olofhagsand/cligen.git))
 
-AC_ARG_WITH(clixon,  [  --with-clixon=dir       Use CLIXON here ] )
-if test "${with_clixon}"; then
-  echo "Using CLIXON here: ${with_clixon}"
-  CPPFLAGS="-I${with_clixon}/include ${CPPFLAGS}"
-  LDFLAGS="-L${with_clixon}/lib ${LDFLAGS}"
-  test -d "$with_clixon" && CLIXON_PREFIX="$with_clixon"
-fi
-
 # Check for clixon
 AC_CHECK_HEADERS(clixon/clixon.h,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), [[ #include <cligen/cligen.h> ]])
 AC_SEARCH_LIBS(clicon_handle_init, clixon,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), -lcligen)
@@ -94,7 +87,7 @@ AC_PROG_CC()
 AC_PROG_CPP
 AC_PROG_INSTALL
 
-CPPFLAGS="-DHAVE_CONFIG_H ${CPPFLAGS}"
+CFLAGS="-DHAVE_CONFIG_H ${CPPFLAGS}"
 
 AC_MSG_RESULT(compiler is $CC)	
 
@@ -103,7 +96,6 @@ CFLAGS="${CFLAGS} -Wall" # -Werror
 AC_MSG_RESULT(CPPFLAGS is $CPPFLAGS)	
 AC_MSG_RESULT(CFLAGS is $CFLAGS)	
 
-LDFLAGS=""
 AC_CHECK_LIB(m, main)
 EXE_SUFFIX=""
 OBJ_SUFFIX=".o"
