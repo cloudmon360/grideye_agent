@@ -479,7 +479,7 @@ grideye_plugin_load_py(void *handle,
     if ((gp_version = grideye_pyobj_to_long(PyList_GetItem(pyretval, 0)))
 	!= GRIDEYE_PLUGIN_VERSION) {
 	    clicon_log(LOG_NOTICE,
-		       "grideye_agent: Disabling %s, wrong version",
+		       "grideye_agent: Disabling %d, wrong version",
 		       gp_version);
 	    goto fail;
     }
@@ -490,7 +490,7 @@ grideye_plugin_load_py(void *handle,
     if ((gp_magic = grideye_pyobj_to_long(PyList_GetItem(pyretval, 1)))
 	!= GRIDEYE_PLUGIN_MAGIC) {
 	    clicon_log(LOG_NOTICE,
-		       "grideye_agent: Disabling %s, wrong magic",
+		       "grideye_agent: Disabling 0x%x, wrong magic",
 		       gp_magic);
 	    goto fail;
     }
@@ -625,10 +625,8 @@ plugin_load_dir(char          *dir,
 {
     int            retval = -1;
     DIR           *dirp = NULL;
-    struct dirent  dent;
-    struct dirent *dresp;
+    struct dirent  *dent;
     void          *handle = NULL;
-    int            res;
     char          *name;
     int            off_so;
     int            off_py;
@@ -642,19 +640,15 @@ plugin_load_dir(char          *dir,
 		    dir);
 	goto done;
     }
+
     /*
      * dirent->d_name is name of directory entry, if dresp is NULL the iteration
      * is done
      */
-   for (res = readdir_r(dirp, &dent, &dresp);
-	dresp;
-	res = readdir_r (dirp, &dent, &dresp)){
-       if (res != 0) {
-	   clicon_err(OE_UNIX, errno, "readdir");
-	   goto done;
-       }
+    while ((dent = readdir(dirp)) != NULL) {
+
        /* match .so */
-       name = dent.d_name;
+       name = dent->d_name;
        off_so = strlen(name)-5;
        off_py = strlen(name) - 3;
 
@@ -872,7 +866,7 @@ url_post(char *url,
 		clicon_log(LOG_DEBUG,  "%s: %s", __FUNCTION__, cb.b_buf);
 		goto done;
 	    }
-	    if (xpath_first(xr, expect) == NULL){
+	    if (xpath_first(xr, "%s", expect) == NULL){
 		clicon_err(OE_PLUGIN, 0, "%s: no match", __FUNCTION__);
 		retval = 0;
 		goto done;
@@ -1719,13 +1713,13 @@ main(int   argc,
 						      0,
 						      NULL)) == NULL) {
 		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile): %s",
 			       p->p_name, strerror(errno));
 		}
 	    } else {
 		if (api->gp_getopt_fn("yangmetric", &yangmetric) < 0){
 		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile): %s",
 			       p->p_name, strerror(errno));
 		}
 	    }
@@ -1757,21 +1751,21 @@ main(int   argc,
 		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: setopt(writefile):%s",
 			   diskio_writefile);
-		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile): %s",
 			   p->p_name, strerror(errno));
 	    }
 	    if (api->gp_setopt_fn("largefile", diskio_largefile) < 0){
 		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin setopt(largefile):%s",
 			   diskio_largefile);
-		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no largefile)",
+		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no largefile): %s",
 			   p->p_name, strerror(errno));
 	    }
 	    if (api->gp_setopt_fn("device", wi) < 0){
 		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: setopt(device):%s",
 			   diskio_largefile);
-		clicon_log(LOG_NOTICE, "Plugin: Disabling %s (no device)",
+		clicon_log(LOG_NOTICE, "Plugin: Disabling %s (no device): %s",
 			   p->p_name, strerror(errno));
 	    }
 	}
