@@ -100,7 +100,7 @@ grideye_http.so.1: grideye_plugin.c grideye_http.c
 	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm
 
 grideye_iperf_client.so.1: grideye_plugin.c grideye_iperf_client.c
-	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm
+	$(CC) $(CFLAGS) -shared -o $@ -lc $^ -lm -liperf
 
 ifeq ($(HOST_CPU),x86_64) 
 ifneq ($(HOST_VENDOR),apple)
