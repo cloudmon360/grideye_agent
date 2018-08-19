@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015-2018 Olof Hagsand
+  Copyright (C) 2015-2018 Olof Hagsand, Kristofer Halin
 
   This file is part of GRIDEYE.
 
@@ -169,7 +169,6 @@ static int  pkts = 0;		 /* packets received counter */
 static int  errpkts = 0;	 /* dropped packets received counter */
 struct timeval firstpkt, lastpkt;
 static int     quiet = 0;
-static struct plugin *plugins = NULL;
 static char    *pidfile = GRIDEYE_AGENT_PIDFILE;
 static char *plugin_dir = NULL;
 static int ssl_verifypeer = 0;
@@ -195,7 +194,8 @@ plugins_len(struct plugin *plugins)
 
 /*! helper function */
 static struct plugin *
-plugin_find(char *name)
+plugin_find(struct plugin *plugins,
+	    char          *name)
 {
     struct plugin *p;
 
@@ -257,9 +257,9 @@ fail:
  *!
  */
 static char
-*grideye_call_method(char *name,
-		     char *method,
-		     int argc,
+*grideye_call_method(char  *name,
+		     char  *method,
+		     int    argc,
 		     char **argv)
 {
     PyObject *pymethod;
@@ -918,10 +918,26 @@ s_rm(struct sender *s)
     return 0;
 }
 
+/*! Run one testround throgh the grideye_agent plugins according to incoming xml
+ * @param[in]  xt      XML tree definining plugins and parameters
+ * @param[in]  plugins Null-terminated list of plugins
+ * @param[out] cb      Output result after plugin evaluation
+ * The incoming XML tree is on the form:
+ * ...
+ *   <plugin>
+ *      <name>diskio_read</name> # name of plugin
+ *      <param>3000</param>      # one or many parameters to plugin
+ *   </plugin>
+ * ...
+ * The function goes through the structure, for each entry, looks up the plugin,
+ * if it is not disabled or in error state, the plugin test function is called 
+ * with the paramaters as an argv list. The function collects the result string
+ * and concatenates it into the result buffer cb.
+ */
 static int
 echo_application(cxobj         *xt,
-		 cbuf          *cb,
-		 struct plugin  plugins[])
+		 struct plugin *plugins,
+		 cbuf          *cb)
 {
     int                retval = -1;
     uint64_t          *v = NULL;
@@ -945,7 +961,7 @@ echo_application(cxobj         *xt,
     /* Invoke plugins */
     if (xpath_vec(xt, "plugin", &xvec, &xlen) < 0)
 	goto done;
-    /* Loop through plugin calls */
+    /* Loop through plugin calls in the XML */
     for (i=0; i<xlen; i++){
 	xp = xvec[i];
 	if ((x = xpath_first(xp, "name")) == NULL){
@@ -959,7 +975,7 @@ echo_application(cxobj         *xt,
 	pstr = xml_body(x);
 
 	/* Find matching plugin */
-	if ((p = plugin_find(pstr)) == NULL)
+	if ((p = plugin_find(plugins, pstr)) == NULL)
 	    continue; /* silently ignore */
 	if (p->p_disable)
 	    continue; /* silently ignore */
@@ -1024,7 +1040,6 @@ echo_application(cxobj         *xt,
     return retval;
 }
 
-
 /*! This is signaling: create agent to send to this agent 
  * Send a CURL POST to controller and register (or change) existing agent.
  * @param[in]  url
@@ -1035,6 +1050,7 @@ echo_application(cxobj         *xt,
  * @param[in]  info          Info about this node/agent
  * @param[in]  curl_timeout  Curl post request timeout in seconds
  * @param[in]  xym           yang metrics required for this agent
+ * @param[in]  plugins       NULL-terminated list of plugins
  * @param[in,out] natstate   0:none 1:enabled 2:addr&port defined 3: connected
  * @see nattraversal_udp
  * XXX: problem with using curl primary_ip in registering server. Eg curl localhost can resolve to
@@ -1048,6 +1064,7 @@ callhome_http(char               *url,
 	      char               *info,
 	      int                 curl_timeout,
 	      cxobj              *xym,
+	      struct plugin      *plugins,
 	      int                *natstate)
 {
     int    retval = -1;
@@ -1168,7 +1185,7 @@ callhome_http(char               *url,
     return retval;
 }
 
-/*!
+/*! Send HTTP data back to controller and get new test instructions back
  * @param[in]     url       URL - where to send http data to
  * @param[in]     name
  * @param[in]     cbmetr    Metric data from echo_application
@@ -1393,13 +1410,13 @@ grideye_sig(int arg)
 
 /*! Exit functions either called on sigterm or end of main */
 static void
-doexit(int arg)
+doexit(struct plugin *plugins)
 {
     struct timeval dur;
     void          *handle = NULL;
     struct plugin *p;
 
-    clicon_log(LOG_NOTICE, "grideye_agent: %s: %d", __FUNCTION__, arg);
+    clicon_log(LOG_NOTICE, "grideye_agent: %s", __FUNCTION__);
     timersub(&lastpkt, &firstpkt, &dur);
 
     if (pidfile)
@@ -1514,6 +1531,7 @@ main(int   argc,
     int                curl_timeout = CURL_TIMEOUT_DEFAULT;
     cxobj             *xym=NULL; /* XML yang metric tree */
     char              *yangmetric;
+    struct plugin     *plugins;
 
     /* Initialization */
     argv0 = argv[0];
@@ -1791,6 +1809,7 @@ main(int   argc,
 			  info,
 			  curl_timeout,
 			  xym,
+			  plugins,
 			  &natstate) < 0)
 	    goto done;
     if ((xtest = xml_new("new", NULL, NULL)) == NULL)
@@ -1836,11 +1855,12 @@ main(int   argc,
 	    if (callhome_http(callhome_url,
 			      hostname,
 			      userid,
-				      NULL,
-				      info,
-				      curl_timeout,
-				      xym,
-				      &natstate) < 0)
+			      NULL,
+			      info,
+			      curl_timeout,
+			      xym,
+			      plugins,
+			      &natstate) < 0)
 			goto done;
 		}
 		else{
@@ -1849,8 +1869,8 @@ main(int   argc,
 			goto done;
 		    }
 		    if ((retval = echo_application(xtest,
-						   cb,
-						   plugins)) < 0)
+						   plugins,
+						   cb)) < 0)
 			goto done;
 		    if (xtest){
 			xml_free(xtest);
@@ -1894,6 +1914,6 @@ main(int   argc,
 	free(diskio_writefile);
     if (diskio_largefile)
 	free(diskio_largefile);
-    doexit(0);
+    doexit(plugins);
     return(retval);
 }
