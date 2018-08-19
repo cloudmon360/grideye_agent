@@ -971,7 +971,6 @@ echo_application(cxobj         *xt,
 	    errpkts++;
 	    goto done;
 	}
-
 	pstr = xml_body(x);
 
 	/* Find matching plugin */
@@ -981,48 +980,57 @@ echo_application(cxobj         *xt,
 	    continue; /* silently ignore */
 	if ((api = p->p_api) == NULL)
 	    continue; /* silently ignore */
-
-	if (api->gp_test_fn != NULL) {
-	    if (xpath_vec(xp, "param", &xpvec, &argc) < 0)
-		goto done;
-	    if (argv != NULL)
-		free(argv);
-	    if ((argv = calloc(argc+1, sizeof(char*))) == NULL){
-		clicon_err(OE_UNIX, errno, "calloc");
-		goto done;
-	    }
+	if (api->gp_test_fn == NULL)
+	    continue; /* silently ignore */
+	if (xpath_vec(xp, "param", &xpvec, &argc) < 0)
+	    goto done;
+	if (argv != NULL)
+	    free(argv);
+	if ((argv = calloc(argc+1, sizeof(char*))) == NULL){
+	    clicon_err(OE_UNIX, errno, "calloc");
+	    goto done;
+	}
+	for (j=0; j<argc; j++)
+	    argv[j] = xml_body(xpvec[j]);
+	/* Debug printout on the functions and arguments called */
+	if (debug){
+	    cbuf *cd = cbuf_new();
+	    cprintf(cd, "%s(", api->gp_name);
 	    for (j=0; j<argc; j++)
-		argv[j] = xml_body(xpvec[j]);
-	    if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
-		if ((str = grideye_call_method(api->gp_name,
-					       (char *)api->gp_test_fn,
-					       argc,
-					       argv)) == NULL)
-		    continue;
-	    } else {
-		if ((pret = api->gp_test_fn(argc, argv, &str)) < 0) {
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
-			       p->p_name, str?str:"");
-		    continue;
-		}
-	    }
-	    if (str) {
-		if (strcmp(api->gp_output_format, "json")==0){
-		    cxobj *xt= NULL;
-		    if (json_parse_str(str, &xt) < 0)
-			goto done;
-		    xml_rootchild(xt,0,&xt);
-		    if (xml2json_cbuf(cb, xt, 0) < 0)
-			goto done;
-		    xml_free(xt);
-		}
-		else
-		    cprintf(cb, "%s", str); /* XML */
-		free(str);
-		str = NULL;
+		cprintf(cd, "%s%s", argv[j], j?" ":"");
+	    cprintf(cd, ")");
+	    clicon_debug(1, "%s %s", __FUNCTION__, cbuf_get(cd));
+	    cbuf_free(cd);
+	}
+	if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
+	    if ((str = grideye_call_method(api->gp_name,
+					   (char *)api->gp_test_fn,
+					   argc,
+					   argv)) == NULL)
+		continue;
+	} else {
+	    if ((pret = api->gp_test_fn(argc, argv, &str)) < 0) {
+		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
+			   p->p_name, str?str:"");
+		continue;
 	    }
 	}
-    }
+	if (str) {
+	    if (strcmp(api->gp_output_format, "json")==0){
+		cxobj *xt= NULL;
+		if (json_parse_str(str, &xt) < 0)
+		    goto done;
+		xml_rootchild(xt,0,&xt);
+		if (xml2json_cbuf(cb, xt, 0) < 0)
+		    goto done;
+		xml_free(xt);
+	    }
+	    else
+		cprintf(cb, "%s", str); /* XML */
+	    free(str);
+	    str = NULL;
+	}
+    } /* for i/xp */
 
     clicon_log(LOG_DEBUG, "grideye_agent: %s return:%s", __FUNCTION__, cbuf_get(cb));
     retval = 1; /* OK */
