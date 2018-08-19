@@ -113,11 +113,11 @@ extern const char GRIDEYE_VERSION[];
 #undef FUZZ
 
 /* By default, this is where grideye_agent looks for plugins
- * This is normally set in configure/Makefile as $exec_prefix/lib/grideye
- * eg /usr/local/lib/grideye.
+ * This is normally set in configure/Makefile as $exec_prefix/lib/grideye/agent
+ * eg /usr/local/lib/grideye/agent.
  */
 #ifndef PLUGINDIR
-#define PLUGINDIR "/usr/local/lib/grideye"
+#define PLUGINDIR "/usr/local/lib/grideye/agent"
 #endif
 
 #define GRIDEYE_PLUGIN_PYTHON 0x50595448

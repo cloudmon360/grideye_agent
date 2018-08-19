@@ -42,7 +42,7 @@ For example:
 
 A typical installation is as follows:
 
-    > configure	       	        # Configure grideye_agent
+    > configure	                # Configure grideye_agent
     > make                      # Compile
     > sudo make install         # Install agent and plugins
 
@@ -344,4 +344,5 @@ covered by copyright and licenses in their source code header (if any).
 
 ## 5. Contact
 
-I can be found at olof@hagsand.se.
+Olof Hagsand and Kristofer Hallin
+

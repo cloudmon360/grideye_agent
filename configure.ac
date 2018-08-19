@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2015-2016 Olof Hagsand
+# Copyright (C) 2015-2018 Olof Hagsand
 #
 # This file is part of GRIDEYE.
 #
@@ -28,7 +28,8 @@
 AC_INIT(grideye_agent.c)
 
 # Default CFLAGS unless set by environment.
-: ${CFLAGS="-O2"}
+: ${CFLAGS="-O2 -Wall"}
+: ${INSTALLFLAGS="-s"}
 
 #AC_CONFIG_HEADER(grideye_config.h)
 # clicon versions spread to Makefile's (.so files) and variable in build.c
@@ -86,12 +87,28 @@ AC_SEARCH_LIBS(clicon_handle_init, clixon,, AC_MSG_ERROR(clixon missing. Try: gi
 AC_PROG_CC()
 AC_PROG_CPP
 AC_PROG_INSTALL
+AC_SUBST(INSTALL)
+AC_SUBST(INSTALLFLAGS)
 
 CFLAGS="-DHAVE_CONFIG_H ${CPPFLAGS}"
 
 AC_MSG_RESULT(compiler is $CC)	
 
-CFLAGS="${CFLAGS} -Wall" # -Werror
+# Debug flag
+AC_ARG_ENABLE(debug, AS_HELP_STRING([--enable-debug],[Build with debug symbols, default: no]),[
+	  if test "$enableval" = no; then
+	      ac_enable_debug=no
+	  else	      
+	      ac_enable_debug=yes
+          fi
+        ],
+	[ ac_enable_debug=no])
+
+AC_MSG_RESULT(debug is $ac_enable_debug)	
+if test "$ac_enable_debug" = "yes"; then
+   CFLAGS="-g -Wall"
+   INSTALLFLAGS=""	
+fi
 
 AC_MSG_RESULT(CPPFLAGS is $CPPFLAGS)	
 AC_MSG_RESULT(CFLAGS is $CFLAGS)	
@@ -126,7 +143,7 @@ AC_CHECK_HEADERS(sys/sysinfo.h)
 
 AC_CHECK_FUNCS(clock_gettime)
 
-AC_SUBST(GRIDEYE_PLUGIN_DIR, $libdir/grideye) # Bind to specific CLIgen version
+AC_SUBST(GRIDEYE_PLUGIN_DIR, $libdir/grideye/agent) 
 echo "LIBDIR: $libdir"
 echo "GRIDEYE_PLUGIN_DIR: $GRIDEYE_PLUGIN_DIR"
 
