@@ -66,7 +66,7 @@ RUN ldconfig
 # Stage 2
 #
 
-FROM debian
+FROM ubuntu
 MAINTAINER Kristofer Hallin <kristofer.hallin@cloudmon360.com>
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -78,11 +78,20 @@ RUN apt-get update && apt-get install -y \
     libfcgi-dev \
     python3-dev \
     libpython3-dev \
-    sysstat
+    sysstat \
+    python3-pip \
+    iperf3
 
-COPY --from=0 /grideye/build/* /usr/
+RUN pip3 install iperf3
+
+COPY --from=0 /grideye/build/bin/ /usr/local/bin/
+COPY --from=0 /grideye/build/etc/ /usr/local/etc/
+COPY --from=0 /grideye/build/include/ /usr/local/include/
+COPY --from=0 /grideye/build/lib/ /usr/local/lib/
+COPY --from=0 /grideye/build/sbin/ /usr/local/sbin/
+COPY --from=0 /grideye/build/share/ /usr/local/share/
 
 RUN ldconfig
 
 # Run grideye-agent
-CMD if [ -z "$NOSSL" ]; then grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s; else grideye_agent -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s -s; fi
+CMD if [ -z "$NOSSL" ]; then grideye_agent -P /usr/local/lib/grideye/agent/ -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s; else grideye_agent -P /usr/local/lib/grideye/agent/ -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s -s; fi

@@ -353,10 +353,15 @@ static char
 
     Py_DECREF(pymethod);
 
-    if (strcmp((char *)Py_TYPE(retval), "str") != 0) {
-        clicon_log(LOG_NOTICE, "grideye_agent: Plugin is supposed to return a string");
+    /*
+
+    XXX: Fix me. Should to proper typechecks here.
+
+    if (strcmp((char *)Py_TYPE(retval), "R") != 0) {
+	clicon_log(LOG_NOTICE, "grideye_agent: Plugin is supposed to return a string, was %s", (char *)Py_TYPE(retval));
 	goto fail;
     }
+    */
 
     if (retval != NULL)
 	outstr = strdup(grideye_pyobj_to_char(retval));
@@ -1006,8 +1011,11 @@ echo_application(cxobj         *xt,
 	    if ((str = grideye_call_method(api->gp_name,
 					   (char *)api->gp_test_fn,
 					   argc,
-					   argv)) == NULL)
-		continue;
+					   argv)) == NULL) {
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed",
+			       p->p_name);
+		    continue;
+	    }
 	} else {
 	    if ((pret = api->gp_test_fn(argc, argv, &str)) < 0) {
 		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
