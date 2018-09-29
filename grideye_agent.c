@@ -224,8 +224,10 @@ static char
 	if ((tmpstr = PyUnicode_AsEncodedString(pyobj, "utf-8", "")) == NULL)
 	    goto fail;
 
-	if ((cstr = PyBytes_AS_STRING(tmpstr)) == NULL)
+	if ((cstr = strdup(PyBytes_AS_STRING(tmpstr))) == NULL)
 	    goto fail;
+
+	Py_DECREF(tmpstr);
 
 	return cstr;
 
@@ -307,7 +309,6 @@ static char
 	goto fail;
 
     Py_Initialize();
-
     PyRun_SimpleString("import sys");
     PyRun_SimpleString(syscmd);
 
@@ -316,8 +317,6 @@ static char
 
     pyname = PyUnicode_DecodeFSDefault(modulename);
     module = PyImport_Import(pyname);
-
-    Py_DECREF(pyname);
 
     if (module == NULL) {
 	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, method);
@@ -333,8 +332,6 @@ static char
 	clicon_log(LOG_ERR, "Method %s is not callable", PLUGIN_INIT_FN);
 	goto fail;
     }
-
-    Py_DECREF(module);
 
     if ((list = PyList_New(argc)) == NULL)
 	goto fail;
@@ -352,8 +349,6 @@ static char
 	goto fail;
     }
 
-    Py_DECREF(pymethod);
-
     /*
 
     XXX: Fix me. Should to proper typechecks here.
@@ -369,14 +364,18 @@ static char
     else
 	outstr = NULL;
 
+    Py_DECREF(pyname);
+    Py_DECREF(module);
+    //Py_DECREF(value);
+    Py_DECREF(pymethod);
+    Py_DECREF(arglist);
+    Py_DECREF(list);
     Py_DECREF(retval);
 
     /* Known bug, Py_Finalize() sometimes makes things crash, don't
        use it for now */
 
-#if 0
     Py_Finalize();
-#endif /* 0 */
 
     return outstr;
 
@@ -454,8 +453,6 @@ grideye_plugin_load_py(void *handle,
     if (modulename)
 	free(modulename);
 
-    Py_DECREF(pyname);
-
     func = PyObject_GetAttrString(module, PLUGIN_INIT_FN);
     if (func == NULL || !PyCallable_Check(func)) {
 		clicon_log(LOG_ERR,
@@ -464,19 +461,13 @@ grideye_plugin_load_py(void *handle,
 		goto fail;
     }
 
-    Py_DECREF(module);
-
     args = PyTuple_New(1);
     value = PyLong_FromLong(GRIDEYE_PLUGIN_VERSION);
 
     PyTuple_SetItem(args, 0, value);
 
-    Py_DECREF(value);
-
     if ((pyretval = PyObject_CallObject(func, args)) == NULL)
 		goto fail;
-
-    Py_DECREF(args);
 
     if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 9) {
 		goto fail;
@@ -510,6 +501,8 @@ grideye_plugin_load_py(void *handle,
     api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 7));
     api->gp_exit_fn = (grideye_plugin_exit_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 8));
 
+    Py_DECREF(pyretval);
+    
     /* Make it possible to distinguish between regular plugins and py-plugins */
     api->gp_magic = GRIDEYE_PLUGIN_PYTHON;
 
@@ -534,6 +527,12 @@ grideye_plugin_load_py(void *handle,
     }
 
     (*plugins)[len].p_api = api;
+
+    Py_DECREF(pyname);
+    Py_DECREF(module);
+    Py_DECREF(value);
+    Py_DECREF(args);
+    Py_DECREF(func);
 
     Py_Finalize();
 
