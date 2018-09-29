@@ -227,6 +227,8 @@ static char
 	if ((cstr = PyBytes_AS_STRING(tmpstr)) == NULL)
 	    goto fail;
 
+	Py_DECREF(tmpstr);
+
 	return cstr;
 
 fail:
@@ -307,7 +309,6 @@ static char
 	goto fail;
 
     Py_Initialize();
-
     PyRun_SimpleString("import sys");
     PyRun_SimpleString(syscmd);
 
@@ -345,6 +346,8 @@ static char
 	PyList_SetItem(list, i, value);
     }
 
+    Py_DECREF(value);
+
     if ((arglist = Py_BuildValue("(O)", list)) == NULL)
 	goto fail;
 
@@ -353,6 +356,8 @@ static char
     }
 
     Py_DECREF(pymethod);
+    Py_DECREF(arglist);
+    Py_DECREF(list);
 
     /*
 
@@ -374,9 +379,7 @@ static char
     /* Known bug, Py_Finalize() sometimes makes things crash, don't
        use it for now */
 
-#if 0
     Py_Finalize();
-#endif /* 0 */
 
     return outstr;
 
@@ -477,6 +480,7 @@ grideye_plugin_load_py(void *handle,
 		goto fail;
 
     Py_DECREF(args);
+    Py_DECREF(func);
 
     if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 9) {
 		goto fail;
@@ -509,6 +513,8 @@ grideye_plugin_load_py(void *handle,
     api->gp_setopt_fn = (grideye_plugin_setopt_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 6));
     api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 7));
     api->gp_exit_fn = (grideye_plugin_exit_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 8));
+
+    Py_DECREF(pyretval);
 
     /* Make it possible to distinguish between regular plugins and py-plugins */
     api->gp_magic = GRIDEYE_PLUGIN_PYTHON;
