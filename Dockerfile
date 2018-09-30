@@ -2,24 +2,25 @@
 # Stage 1
 #
 
-FROM ubuntu
+FROM alpine
 
 # Packages needed for building
-RUN apt-get update && apt-get install -y \
+RUN apk update && apk add \
+    glib \
     curl \
+    curl-dev \
     git \
     make \
     gcc \
+    g++ \
     automake \
     flex \
     bison \
-    libcurl4-openssl-dev \
-    libfcgi-dev \
+    fcgi-dev \
     python3-dev \
-    libpython3-dev \
     sysstat
 
-RUN ldconfig
+# RUN ldconfig
 
 # Create a directory to hold source-code, dependencies etc
 RUN mkdir /grideye
@@ -60,30 +61,28 @@ RUN make install
 WORKDIR /grideye/grideye_agent/plugins/
 RUN make install
 
-RUN ldconfig
+# RUN ldconfig
 
 #
 # Stage 2
 #
 
-FROM ubuntu
+FROM alpine
 MAINTAINER Kristofer Hallin <kristofer.hallin@cloudmon360.com>
 ENV DEBIAN_FRONTEND noninteractive
 
 # Packages needed for building
-RUN apt-get update && apt-get install -y \
+RUN apk update && apk add \
     curl \
     make \
-    libcurl4-openssl-dev \
-    libfcgi-dev \
-    python3-dev \
-    libpython3-dev \
+    libcurl \
+    fcgi \
+    python3 \
     sysstat \
-    python3-pip \
     iperf3
 
 RUN pip3 install iperf3
-
+    
 COPY --from=0 /grideye/build/bin/ /usr/local/bin/
 COPY --from=0 /grideye/build/etc/ /usr/local/etc/
 COPY --from=0 /grideye/build/include/ /usr/local/include/
@@ -91,7 +90,9 @@ COPY --from=0 /grideye/build/lib/ /usr/local/lib/
 COPY --from=0 /grideye/build/sbin/ /usr/local/sbin/
 COPY --from=0 /grideye/build/share/ /usr/local/share/
 
-RUN ldconfig
+RUN ls /usr/local/bin/
+
+#RUN ldconfig
 
 # Run grideye-agent
-CMD if [ -z "$NOSSL" ]; then grideye_agent -P /usr/local/lib/grideye/agent/ -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s; else grideye_agent -P /usr/local/lib/grideye/agent/ -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s -s; fi
+CMD if [ -z "$NOSSL" ]; then /usr/local/bin/grideye_agent -P /usr/local/lib/grideye/agent/ -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s; else /usr/local/bin/grideye_agent -P /usr/local/lib/grideye/agent/ -u $GRIDEYE_URL -I $GRIDEYE_UUID -N $GRIDEYE_NAME -F -s -s; fi
