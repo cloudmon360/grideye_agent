@@ -3,7 +3,7 @@
  * This is a basic BogoMips test running a specified number of empty loops
  *
  * compile:
- *   gcc -O2 -Wall -o cycles cycles.c cycles_test.s
+ *   gcc -O2 -Wall -o grideye_cycles grideye_cycles.c grideye_cycles_test.s
  * run: 
  *   ./cycles
  */
@@ -132,7 +132,6 @@ int main()
 
     if (grideye_plugin_init(2) == NULL)
 	return -1;
-    fprintf(stdout, "warmup: %d\n", _warmup);
     if (cycles_test(NULL, &str) < 0)
 	return -1;
     fprintf(stdout, "%s\n", str);
