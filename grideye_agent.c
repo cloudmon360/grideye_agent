@@ -1,5 +1,5 @@
 /*
-  Copyright (C) 2015-2018 Olof Hagsand
+  Copyright (C) 2015-2018 Olof Hagsand, Kristofer Halin
 
   This file is part of GRIDEYE.
 
@@ -81,8 +81,10 @@ extern const char GRIDEYE_VERSION[];
  * Version 3:
  *   Send callhome as restconf clixon RPC instead of just HTTP
  *   HTTP initiated from agent as control protocol option
+ * Version 4:
+ *   Single agent can report multiple series, eg name, name.foo, name.bar
  */
-#define GRIDEYE_AGENT_VERSION 3
+#define GRIDEYE_AGENT_VERSION 4
 
 /* Set this to a file (prefix) and this will dump incoming binary messages */
 //#define DUMPMSGFILE "grideyedump"
@@ -113,11 +115,11 @@ extern const char GRIDEYE_VERSION[];
 #undef FUZZ
 
 /* By default, this is where grideye_agent looks for plugins
- * This is normally set in configure/Makefile as $exec_prefix/lib/grideye
- * eg /usr/local/lib/grideye.
+ * This is normally set in configure/Makefile as $exec_prefix/lib/grideye/agent
+ * eg /usr/local/lib/grideye/agent.
  */
 #ifndef PLUGINDIR
-#define PLUGINDIR "/usr/local/lib/grideye"
+#define PLUGINDIR "/usr/local/lib/grideye/agent"
 #endif
 
 #define GRIDEYE_PLUGIN_PYTHON 0x50595448
@@ -164,12 +166,10 @@ struct plugin{
  */
 static struct sender *s_list = NULL;
 /* XXX: should be moved as doexit code is moved */
-static char hostname[128] = {0,};/* name of this host, -N or gethostname */
 static int  pkts = 0;		 /* packets received counter */
 static int  errpkts = 0;	 /* dropped packets received counter */
 struct timeval firstpkt, lastpkt;
 static int     quiet = 0;
-static struct plugin *plugins = NULL;
 static char    *pidfile = GRIDEYE_AGENT_PIDFILE;
 static char *plugin_dir = NULL;
 static int ssl_verifypeer = 0;
@@ -195,7 +195,8 @@ plugins_len(struct plugin *plugins)
 
 /*! helper function */
 static struct plugin *
-plugin_find(char *name)
+plugin_find(struct plugin *plugins,
+	    char          *name)
 {
     struct plugin *p;
 
@@ -223,8 +224,10 @@ static char
 	if ((tmpstr = PyUnicode_AsEncodedString(pyobj, "utf-8", "")) == NULL)
 	    goto fail;
 
-	if ((cstr = PyBytes_AS_STRING(tmpstr)) == NULL)
+	if ((cstr = strdup(PyBytes_AS_STRING(tmpstr))) == NULL)
 	    goto fail;
+
+	Py_DECREF(tmpstr);
 
 	return cstr;
 
@@ -257,9 +260,9 @@ fail:
  *!
  */
 static char
-*grideye_call_method(char *name,
-		     char *method,
-		     int argc,
+*grideye_call_method(char  *name,
+		     char  *method,
+		     int    argc,
 		     char **argv)
 {
     PyObject *pymethod;
@@ -306,7 +309,6 @@ static char
 	goto fail;
 
     Py_Initialize();
-
     PyRun_SimpleString("import sys");
     PyRun_SimpleString(syscmd);
 
@@ -315,8 +317,6 @@ static char
 
     pyname = PyUnicode_DecodeFSDefault(modulename);
     module = PyImport_Import(pyname);
-
-    Py_DECREF(pyname);
 
     if (module == NULL) {
 	clicon_log(LOG_ERR, "Failed to load Python module %s method %s", modulename, method);
@@ -332,8 +332,6 @@ static char
 	clicon_log(LOG_ERR, "Method %s is not callable", PLUGIN_INIT_FN);
 	goto fail;
     }
-
-    Py_DECREF(module);
 
     if ((list = PyList_New(argc)) == NULL)
 	goto fail;
@@ -351,26 +349,33 @@ static char
 	goto fail;
     }
 
-    Py_DECREF(pymethod);
+    /*
 
-    if (strcmp((char *)Py_TYPE(retval), "str") != 0) {
-        clicon_log(LOG_NOTICE, "grideye_agent: Plugin is supposed to return a string");
+    XXX: Fix me. Should to proper typechecks here.
+
+    if (strcmp((char *)Py_TYPE(retval), "R") != 0) {
+	clicon_log(LOG_NOTICE, "grideye_agent: Plugin is supposed to return a string, was %s", (char *)Py_TYPE(retval));
 	goto fail;
     }
+    */
 
     if (retval != NULL)
 	outstr = strdup(grideye_pyobj_to_char(retval));
     else
 	outstr = NULL;
 
+    Py_DECREF(pyname);
+    Py_DECREF(module);
+    //Py_DECREF(value);
+    Py_DECREF(pymethod);
+    Py_DECREF(arglist);
+    Py_DECREF(list);
     Py_DECREF(retval);
 
     /* Known bug, Py_Finalize() sometimes makes things crash, don't
        use it for now */
 
-#if 0
     Py_Finalize();
-#endif /* 0 */
 
     return outstr;
 
@@ -448,8 +453,6 @@ grideye_plugin_load_py(void *handle,
     if (modulename)
 	free(modulename);
 
-    Py_DECREF(pyname);
-
     func = PyObject_GetAttrString(module, PLUGIN_INIT_FN);
     if (func == NULL || !PyCallable_Check(func)) {
 		clicon_log(LOG_ERR,
@@ -458,19 +461,13 @@ grideye_plugin_load_py(void *handle,
 		goto fail;
     }
 
-    Py_DECREF(module);
-
     args = PyTuple_New(1);
     value = PyLong_FromLong(GRIDEYE_PLUGIN_VERSION);
 
     PyTuple_SetItem(args, 0, value);
 
-    Py_DECREF(value);
-
     if ((pyretval = PyObject_CallObject(func, args)) == NULL)
 		goto fail;
-
-    Py_DECREF(args);
 
     if (PyList_Check(pyretval) != 1 || PyList_Size(pyretval) != 9) {
 		goto fail;
@@ -479,7 +476,7 @@ grideye_plugin_load_py(void *handle,
     if ((gp_version = grideye_pyobj_to_long(PyList_GetItem(pyretval, 0)))
 	!= GRIDEYE_PLUGIN_VERSION) {
 	    clicon_log(LOG_NOTICE,
-		       "grideye_agent: Disabling %s, wrong version",
+		       "grideye_agent: Disabling %d, wrong version",
 		       gp_version);
 	    goto fail;
     }
@@ -490,7 +487,7 @@ grideye_plugin_load_py(void *handle,
     if ((gp_magic = grideye_pyobj_to_long(PyList_GetItem(pyretval, 1)))
 	!= GRIDEYE_PLUGIN_MAGIC) {
 	    clicon_log(LOG_NOTICE,
-		       "grideye_agent: Disabling %s, wrong magic",
+		       "grideye_agent: Disabling 0x%x, wrong magic",
 		       gp_magic);
 	    goto fail;
     }
@@ -504,6 +501,8 @@ grideye_plugin_load_py(void *handle,
     api->gp_test_fn = (grideye_plugin_test_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 7));
     api->gp_exit_fn = (grideye_plugin_exit_t *)grideye_pyobj_to_char(PyList_GetItem(pyretval, 8));
 
+    Py_DECREF(pyretval);
+    
     /* Make it possible to distinguish between regular plugins and py-plugins */
     api->gp_magic = GRIDEYE_PLUGIN_PYTHON;
 
@@ -528,6 +527,12 @@ grideye_plugin_load_py(void *handle,
     }
 
     (*plugins)[len].p_api = api;
+
+    Py_DECREF(pyname);
+    Py_DECREF(module);
+    Py_DECREF(value);
+    Py_DECREF(args);
+    Py_DECREF(func);
 
     Py_Finalize();
 
@@ -625,10 +630,8 @@ plugin_load_dir(char          *dir,
 {
     int            retval = -1;
     DIR           *dirp = NULL;
-    struct dirent  dent;
-    struct dirent *dresp;
+    struct dirent  *dent;
     void          *handle = NULL;
-    int            res;
     char          *name;
     int            off_so;
     int            off_py;
@@ -642,19 +645,15 @@ plugin_load_dir(char          *dir,
 		    dir);
 	goto done;
     }
+
     /*
      * dirent->d_name is name of directory entry, if dresp is NULL the iteration
      * is done
      */
-   for (res = readdir_r(dirp, &dent, &dresp);
-	dresp;
-	res = readdir_r (dirp, &dent, &dresp)){
-       if (res != 0) {
-	   clicon_err(OE_UNIX, errno, "readdir");
-	   goto done;
-       }
+    while ((dent = readdir(dirp)) != NULL) {
+
        /* match .so */
-       name = dent.d_name;
+       name = dent->d_name;
        off_so = strlen(name)-5;
        off_py = strlen(name) - 3;
 
@@ -872,7 +871,7 @@ url_post(char *url,
 		clicon_log(LOG_DEBUG,  "%s: %s", __FUNCTION__, cb.b_buf);
 		goto done;
 	    }
-	    if (xpath_first(xr, expect) == NULL){
+	    if (xpath_first(xr, "%s", expect) == NULL){
 		clicon_err(OE_PLUGIN, 0, "%s: no match", __FUNCTION__);
 		retval = 0;
 		goto done;
@@ -924,10 +923,26 @@ s_rm(struct sender *s)
     return 0;
 }
 
+/*! Run one testround throgh the grideye_agent plugins according to incoming xml
+ * @param[in]  xser   XML tree of test series
+ * @param[in]  plugins Null-terminated list of plugins
+ * @param[out] cb      Output result after plugin evaluation
+ * The incoming XML tree is on the form:
+ * ...
+ *   <plugin>
+ *      <name>diskio_read</name> # name of plugin
+ *      <param>3000</param>      # one or many parameters to plugin
+ *   </plugin>
+ * ...
+ * The function goes through the structure, for each entry, looks up the plugin,
+ * if it is not disabled or in error state, the plugin test function is called 
+ * with the paramaters as an argv list. The function collects the result string
+ * and concatenates it into the result buffer cb.
+ */
 static int
-echo_application(cxobj         *xt,
-		 cbuf          *cb,
-		 struct plugin  plugins[])
+run_testround(cxobj         *xser,
+	      struct plugin *plugins,
+	      cbuf          *cb)
 {
     int                retval = -1;
     uint64_t          *v = NULL;
@@ -941,17 +956,17 @@ echo_application(cxobj         *xt,
     char              *str = NULL;
     cxobj             *x;
     cxobj             *xp;
-    cxobj            **xvec = NULL;
+    cxobj            **xvec = NULL;  /* plugin vec */
     size_t             xlen;
-    cxobj            **xpvec = NULL;
+    cxobj            **xpvec = NULL; /* param vec */
     size_t             argc;
     char             **argv = NULL;
 
     clicon_log(LOG_DEBUG, "grideye_agent: %s", __FUNCTION__);
     /* Invoke plugins */
-    if (xpath_vec(xt, "plugin", &xvec, &xlen) < 0)
+    if (xpath_vec(xser, "plugin", &xvec, &xlen) < 0)
 	goto done;
-    /* Loop through plugin calls */
+    /* Loop through plugin calls in the XML */
     for (i=0; i<xlen; i++){
 	xp = xvec[i];
 	if ((x = xpath_first(xp, "name")) == NULL){
@@ -961,59 +976,69 @@ echo_application(cxobj         *xt,
 	    errpkts++;
 	    goto done;
 	}
-
 	pstr = xml_body(x);
 
 	/* Find matching plugin */
-	if ((p = plugin_find(pstr)) == NULL)
+	if ((p = plugin_find(plugins, pstr)) == NULL)
 	    continue; /* silently ignore */
 	if (p->p_disable)
 	    continue; /* silently ignore */
 	if ((api = p->p_api) == NULL)
 	    continue; /* silently ignore */
-
-	if (api->gp_test_fn != NULL) {
-	    if (xpath_vec(xp, "param", &xpvec, &argc) < 0)
-		goto done;
-	    if (argv != NULL)
-		free(argv);
-	    if ((argv = calloc(argc+1, sizeof(char*))) == NULL){
-		clicon_err(OE_UNIX, errno, "calloc");
-		goto done;
-	    }
+	if (api->gp_test_fn == NULL)
+	    continue; /* silently ignore */
+	if (xpath_vec(xp, "param", &xpvec, &argc) < 0)
+	    goto done;
+	if (argv != NULL)
+	    free(argv);
+	if ((argv = calloc(argc+1, sizeof(char*))) == NULL){
+	    clicon_err(OE_UNIX, errno, "calloc");
+	    goto done;
+	}
+	for (j=0; j<argc; j++)
+	    argv[j] = xml_body(xpvec[j]);
+	/* Debug printout on the functions and arguments called */
+	if (debug){
+	    cbuf *cd = cbuf_new();
+	    cprintf(cd, "%s(", api->gp_name);
 	    for (j=0; j<argc; j++)
-		argv[j] = xml_body(xpvec[j]);
-	    if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
-		if ((str = grideye_call_method(api->gp_name,
-					       (char *)api->gp_test_fn,
-					       argc,
-					       argv)) == NULL)
+		cprintf(cd, "%s%s", argv[j], j?" ":"");
+	    cprintf(cd, ")");
+	    clicon_debug(1, "%s %s", __FUNCTION__, cbuf_get(cd));
+	    cbuf_free(cd);
+	}
+	if (api->gp_magic == GRIDEYE_PLUGIN_PYTHON) {
+	    if ((str = grideye_call_method(api->gp_name,
+					   (char *)api->gp_test_fn,
+					   argc,
+					   argv)) == NULL) {
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed",
+			       p->p_name);
 		    continue;
-	    } else {
-		if ((pret = api->gp_test_fn(argc, argv, &str)) < 0) {
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
-			       p->p_name, str?str:"");
-		    continue;
-		}
 	    }
-	    if (str) {
-		if (strcmp(api->gp_output_format, "json")==0){
-		    cxobj *xt= NULL;
-		    if (json_parse_str(str, &xt) < 0)
-			goto done;
-		    xml_rootchild(xt,0,&xt);
-		    if (xml2json_cbuf(cb, xt, 0) < 0)
-			goto done;
-		    xml_free(xt);
-		}
-		else
-		    cprintf(cb, "%s", str); /* XML */
-		free(str);
-		str = NULL;
+	} else {
+	    if ((pret = api->gp_test_fn(argc, argv, &str)) < 0) {
+		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: %s failed: %s",
+			   p->p_name, str?str:"");
+		continue;
 	    }
 	}
-    }
-
+	if (str) {
+	    if (strcmp(api->gp_output_format, "json")==0){
+		cxobj *xjson= NULL;
+		if (json_parse_str(str, &xjson) < 0)
+		    goto done;
+		xml_rootchild(xjson, 0, &xjson);
+		if (xml2json_cbuf(cb, xjson, 0) < 0)
+		    goto done;
+		xml_free(xjson);
+	    }
+	    else
+		cprintf(cb, "%s", str); /* XML */
+	    free(str);
+	    str = NULL;
+	}
+    } /* for i/xp */
     clicon_log(LOG_DEBUG, "grideye_agent: %s return:%s", __FUNCTION__, cbuf_get(cb));
     retval = 1; /* OK */
  done:
@@ -1030,7 +1055,6 @@ echo_application(cxobj         *xt,
     return retval;
 }
 
-
 /*! This is signaling: create agent to send to this agent 
  * Send a CURL POST to controller and register (or change) existing agent.
  * @param[in]  url
@@ -1039,8 +1063,9 @@ echo_application(cxobj         *xt,
  * @param[in]  proto
  * @param[in]  myaddr        Address, port of locally bound socket
  * @param[in]  info          Info about this node/agent
- * @param[in]  curl_timeout  Curl post request timeout in seconds
+ * @param[in]  ctrl_timeout  Curl post request timeout in seconds
  * @param[in]  xym           yang metrics required for this agent
+ * @param[in]  plugins       NULL-terminated list of plugins
  * @param[in,out] natstate   0:none 1:enabled 2:addr&port defined 3: connected
  * @see nattraversal_udp
  * XXX: problem with using curl primary_ip in registering server. Eg curl localhost can resolve to
@@ -1052,8 +1077,9 @@ callhome_http(char               *url,
 	      char               *id,
 	      struct sockaddr_in *myaddr,
 	      char               *info,
-	      int                 curl_timeout,
+	      int                 ctrl_timeout,
 	      cxobj              *xym,
+	      struct plugin      *plugins,
 	      int                *natstate)
 {
     int    retval = -1;
@@ -1113,7 +1139,7 @@ callhome_http(char               *url,
     cprintf(cb, "\"proto\":\"%s\"", grideye_proto2str(GRIDEYE_PROTO_HTTP));
     cprintf(cb, "}}");
     cprintf(ub, "%s/restconf/operations/grideye:callhome", url);
-    ret = url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+json", NULL, curl_timeout,
+    ret = url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+json", NULL, ctrl_timeout,
 		   &getdata, &remoteip);
     switch (ret){
     case -2: /* fatal */
@@ -1174,29 +1200,36 @@ callhome_http(char               *url,
     return retval;
 }
 
-/*!
+/*! Send HTTP data back to controller and get new test instructions back
  * @param[in]     url       URL - where to send http data to
- * @param[in]     name
- * @param[in]     cbmetr    Metric data from echo_application
+ * @param[in]     agentname Name of this agent
+ * @param[in]     cbmetr    Metric data from run_testround
+ * @param[in,out] sseq      Sender sequence
+ * @param[in,out] t0        Timestamp t0
+ * @param[in,out] t0valid   t0 is valid
+ * @param[in,out] t1        Timestamp t1
+ * @param[in,out] t1valid   t1 is valid
  * @param[in]     timeout   Curl post request timeout in seconds
  * @param[in,out] natstate  0:none 1:enabled 2:addr&port defined 3: connected
- * @param[out]    interval
+ * @param[out]    interval  Time interval to send to controller
  * @param[out]    xplugin   This is test initiator received from the controller
+ * It will send something like:
+ * <input><name>agent</name><t0>..</t0><series><name>series</name><tior>...
  */
 static int
-http_data(char               *url,
-	  char               *name,
-	  char               *id,
-	  cbuf               *cbmetr,
-	  uint64_t           *sseq,
-	  int                *t0valid,
-	  struct timeval     *t0,
-	  int                *t1valid,
-	  struct timeval     *t1,
-	  int                 curl_timeout,
-	  int                *natstate,
-	  int                *interval,
-	  cxobj             **xplugin)
+controller_report(char           *url,
+		  char           *agentname,
+		  char           *id,
+		  cbuf           *cbmetr,
+		  uint64_t       *sseq,
+		  struct timeval *t0,
+		  int            *t0valid,
+		  struct timeval *t1,
+		  int            *t1valid,
+		  int             ctrl_timeout,
+		  int            *natstate,
+		  int            *interval,
+		  cxobj         **xtest)
 {
     int     retval = -1;
     cbuf   *ub = NULL;
@@ -1227,8 +1260,12 @@ http_data(char               *url,
       clicon_err(OE_UNIX, errno, "cbuf_new");
       goto done;
     }
+    /* XXX: multiple series:
+     * 1. New <input> for new series YES for simplicity
+     * 2. Sub-series within input? <input><series> NO
+     */
     cprintf(cb, "<input>");
-    cprintf(cb, "<name>%s</name>", name);
+    cprintf(cb, "<name>%s</name>", agentname); /* name of agent */
     cprintf(cb, "<userid>%s</userid>", id);
     cprintf(cb, "<sseqn>%" PRIu64 "</sseqn>", *sseq);
     cprintf(cb, "<aseqn>%" PRIu64 "</aseqn>", aseq++);
@@ -1249,7 +1286,7 @@ http_data(char               *url,
     cprintf(ub, "%s/restconf/operations/grideye:agent-data", url);
     /* XXX return is JSON */
     ret = url_post(cbuf_get(ub), cbuf_get(cb), "Content-Type: application/yang-data+xml",
-		   NULL, curl_timeout, &getdata, &remoteip);
+		   NULL, ctrl_timeout, &getdata, &remoteip);
     switch (ret){
     case -2: /* fatal */
 	goto done;
@@ -1259,6 +1296,10 @@ http_data(char               *url,
 	goto ok;
     default:
 	break;
+    }
+    if (getdata==NULL || strlen(getdata)==0){
+	*natstate = 0;
+	goto ok;
     }
     gettimeofday(t1, NULL);
     *t1valid = 1;
@@ -1322,8 +1363,12 @@ http_data(char               *url,
 	t0->tv_usec = i64%1000000;
 	*t0valid = 1;
     }
+    if (*xtest)
+	xml_free(*xtest);
+    if ((*xtest = xml_new("new", NULL, NULL)) == NULL)
+	goto done;
     if ((x = xpath_first(xreply, "output")) != NULL)
-	if (xml_copy(x, *xplugin) < 0)
+	if (xml_copy(x, *xtest) < 0)
 	    goto done;
  ok:
     retval = 0;
@@ -1344,6 +1389,122 @@ http_data(char               *url,
     return retval;
 }
 
+/*! Iterate through test series, run tests and report to controller
+ * 
+ * Run through tests (if any), then report results back to 
+ * controller, and at the same time query for new test 
+ * series. 
+ * @note xtest must survive between calls since the test series are received 
+ *       at the end of the previous call
+ * and used for tests at the beginning of the next call.
+ * @param[in]     agentname      Name of this agent
+ * @param[in]     plugins        List of plugins
+ * @param[in]     userid
+ * @param[in]     ctrl_url URL to controller
+ * @param[in]     ctrl_timeout
+ * @param[in]     plugins        List of existing plugins in agent
+ * @param[in,out] sseq           Sender sequence
+ * @param[in,out] natstate       0:none 1:enabled 2:addr&port defined 3: connected
+ * @param[out]    interval  Time interval to send to controller
+ * @param[in,out] t0             Timestamp t0
+ * @param[in,out] t0valid        t0 is valid
+ * @param[in,out] t1             Timestamp t1
+ * @param[in,out] t1valid        t1 is valid
+ * @param[in,out] xtest          XML test tree, received from controller
+ */
+static int
+run_test_series(char           *agentname,
+		struct plugin  *plugins,
+		char           *userid,
+		char           *ctrl_url,
+		int             ctrl_timeout,
+		uint64_t       *sseq,		  
+		int            *natstate,
+		int            *interval,
+		struct timeval *t0,
+		int            *t0valid,
+		struct timeval *t1,
+		int            *t1valid,
+		cxobj         **xtest)
+{
+    int        retval = -1;
+    cxobj    **xsvec = NULL; /* series vec */
+    size_t     xslen;
+    int        si;
+    cxobj     *xser;
+    char      *seriesname; /* series name */
+    cxobj     *x;
+    cbuf      *cbmetr = NULL;
+
+    /* Get vector of test series XML trees */
+    if (*xtest && xpath_vec(*xtest, "series", &xsvec, &xslen) < 0)
+	goto done;
+    if (*xtest== NULL || xslen==0){ /* No series, still call report */
+	if (controller_report(ctrl_url,
+			      agentname,
+			      userid,
+			      NULL,
+			      sseq,
+			      t0, t0valid,
+			      t1, t1valid,
+			      ctrl_timeout,
+			      natstate,
+			      interval,
+			      xtest) < 0)
+	    goto done;
+    }
+    /* Loop through test series */
+    else{
+	/* test series result buffer w metrics from tests to controller */
+	if ((cbmetr = cbuf_new()) ==NULL){
+	    clicon_err(OE_PLUGIN, errno, "cbuf_new");
+	    goto done;
+	}
+	for (si=0; si<xslen; si++){
+	    xser = xsvec[si];
+	    if ((x = xpath_first(xser, "name")) == NULL){
+		clicon_log(LOG_ERR, "grideye_agent: %s: <name> expected in series",
+			   __FUNCTION__);
+		retval = 0; 	    /* sanity check failed, just continue */
+		errpkts++;
+		goto done;
+	    }
+	    seriesname = xml_body(x);
+	    cprintf(cbmetr, "<series><name>%s</name>", seriesname);
+	    /* Get all test series, result in cbmetr */
+	    if ((retval = run_testround(xser,
+					plugins,
+					cbmetr)) < 0)
+		goto done;
+	    /* Send metrics to controller and get new XML test 
+	     * Get _all_ metrics from testround using a single long cbmetr 
+	     * as a list of <series> elements
+	     */
+	    cprintf(cbmetr, "</series>");
+	} /* for series */
+    } /* if xtest */
+    /* Send all series results to controller and get new test cases back */
+    if (controller_report(ctrl_url,
+			  agentname,
+			  userid,
+			  cbmetr,
+			  sseq,
+			  t0, t0valid,
+			  t1, t1valid,
+			  ctrl_timeout,
+			  natstate,
+			  interval,
+			  xtest) < 0) /* XXX cant take new here in loop */
+	    goto done;
+
+    retval = 0;
+ done:
+    if (xsvec)
+	free(xsvec);
+    if (cbmetr)
+	cbuf_free(cbmetr);
+    return retval;
+}
 
 /* For linux /proc */
 #define PROC_CPUINFO "/proc/cpuinfo"
@@ -1365,7 +1526,6 @@ get_system_info(char **info)
       goto done;
     }
 #else
-
     char *line;
     char *s;
 
@@ -1399,19 +1559,20 @@ grideye_sig(int arg)
 
 /*! Exit functions either called on sigterm or end of main */
 static void
-doexit(int arg)
+doexit(char          *agentname,
+       struct plugin *plugins)
 {
     struct timeval dur;
     void          *handle = NULL;
     struct plugin *p;
 
-    clicon_log(LOG_NOTICE, "grideye_agent: %s: %d", __FUNCTION__, arg);
+    clicon_log(LOG_NOTICE, "grideye_agent: %s", __FUNCTION__);
     timersub(&lastpkt, &firstpkt, &dur);
 
     if (pidfile)
 	unlink(pidfile);
     clicon_log(LOG_NOTICE, "grideye_agent: %s: Terminated: Received %d packets (term) during %ld.%03ld secs",
-	    hostname, pkts, dur.tv_sec, dur.tv_usec/1000);
+	    agentname, pkts, dur.tv_sec, dur.tv_usec/1000);
     if (plugins){
 	handle = plugins->p_handle;
 /* Cant run exit functions here because we may run in interrupt stack */
@@ -1494,7 +1655,7 @@ main(int   argc,
     char               *diskio_largefile = NULL;
     char               *diskio_writefile = NULL;
     int                natstate; /* state: 0:none 1:enabled 2:addr&port defined */
-    char               *callhome_url;
+    char               *ctrl_url;
     struct timeval     tv;
     struct timeval     trnd;
     char               *userid = NULL;
@@ -1512,20 +1673,22 @@ main(int   argc,
     char               pidfile[MAXPATHLEN];
     cxobj             *xtest = NULL;
     int                interval = 10000;
-    int                ct0valid = 0; /* If ct0 and ct1 are valid */
-    struct timeval     ct0;
-    int                ct1valid = 0; /* If ct0 and ct1 are valid */
-    struct timeval     ct1;
+    struct timeval     ct0;          /* timestamp t0 */
+    int                ct0valid = 0; /* ct0 is valid */
+    struct timeval     ct1;          /* timestamp t1 */
+    int                ct1valid = 0; /* ct1 is valid */
     uint64_t           sseq = 0;
-    int                curl_timeout = CURL_TIMEOUT_DEFAULT;
+    int                ctrl_timeout = CURL_TIMEOUT_DEFAULT;
     cxobj             *xym=NULL; /* XML yang metric tree */
     char              *yangmetric;
+    struct plugin     *plugins;
+    char agentname[128] = {0,};/* name of this host, -N or gethostname */
 
     /* Initialization */
     argv0 = argv[0];
     localport = 0;
     natstate = 1;
-    callhome_url = NULL;
+    ctrl_url = NULL;
     callhome_timeout = CALLHOME_DEFAULT; /* timeout for call home */
     filename = NULL;
     f = NULL;
@@ -1546,7 +1709,7 @@ main(int   argc,
 #endif
 
     /* Hostname for logs and callbacks, overwritten by -N */
-    if (gethostname(hostname, sizeof(hostname)) < 0) {
+    if (gethostname(agentname, sizeof(agentname)) < 0) {
 	clicon_err(OE_UNIX, errno, "gethostname");
 	exit(0);
     }
@@ -1601,14 +1764,14 @@ main(int   argc,
 	    diskio_dir = optarg;
 	    break;
 	case 'u':    /* URL used with callback */
-	    callhome_url = optarg;
+	    ctrl_url = optarg;
 	    break;
 	case 'I':    /* user id used with callback url */
 	    userid = optarg;
 	    break;
 	case 'N':    /* Name to use with -u and in logs */
-	    strncpy(hostname, optarg, sizeof(hostname));
-	    hostname[sizeof(hostname) - 1]= '\0';
+	    strncpy(agentname, optarg, sizeof(agentname));
+	    agentname[sizeof(agentname) - 1]= '\0';
 	    break;
 	case 'w':    /* Wireless interface */
 	    wi = optarg;
@@ -1719,13 +1882,13 @@ main(int   argc,
 						      0,
 						      NULL)) == NULL) {
 		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile): %s",
 			       p->p_name, strerror(errno));
 		}
 	    } else {
 		if (api->gp_getopt_fn("yangmetric", &yangmetric) < 0){
 		    clicon_log(LOG_DEBUG, "grideye_agent: Plugin: getopt(yangmetric)");
-		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+		    clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile): %s",
 			       p->p_name, strerror(errno));
 		}
 	    }
@@ -1757,21 +1920,21 @@ main(int   argc,
 		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: setopt(writefile):%s",
 			   diskio_writefile);
-		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile)",
+		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no writefile): %s",
 			   p->p_name, strerror(errno));
 	    }
 	    if (api->gp_setopt_fn("largefile", diskio_largefile) < 0){
 		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin setopt(largefile):%s",
 			   diskio_largefile);
-		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no largefile)",
+		clicon_log(LOG_NOTICE, "grideye_agent: Plugin: Disabling %s (no largefile): %s",
 			   p->p_name, strerror(errno));
 	    }
 	    if (api->gp_setopt_fn("device", wi) < 0){
 		p->p_disable++;
 		clicon_log(LOG_DEBUG, "grideye_agent: Plugin: setopt(device):%s",
 			   diskio_largefile);
-		clicon_log(LOG_NOTICE, "Plugin: Disabling %s (no device)",
+		clicon_log(LOG_NOTICE, "Plugin: Disabling %s (no device): %s",
 			   p->p_name, strerror(errno));
 	    }
 	}
@@ -1789,34 +1952,32 @@ main(int   argc,
     set_signal(SIGINT, grideye_sig, NULL);
     set_signal(SIGTERM, grideye_sig, NULL);
 
-    if (callhome_url && userid)     /* Timeout Send a (call)home message */
-	if (callhome_http(callhome_url,
-			  hostname,
+    if (ctrl_url && userid)     /* Timeout Send a (call)home message */
+	if (callhome_http(ctrl_url,
+			  agentname,
 			  userid,
 			  NULL,
 			  info,
-			  curl_timeout,
+			  ctrl_timeout,
 			  xym,
+			  plugins,
 			  &natstate) < 0)
 	    goto done;
-    if ((xtest = xml_new("new", NULL, NULL)) == NULL)
-	goto done;
     if (natstate == 2)
-	if (http_data(callhome_url,
-		      hostname,
-		      userid,
-			  NULL,
-			  &sseq,
-			  &ct0valid, &ct0,
-			  &ct1valid, &ct1,
-			  curl_timeout,
-			  &natstate,
-			  &interval,
-			  &xtest) < 0)
+	if (controller_report(ctrl_url,
+			      agentname,
+			      userid,
+			      NULL,
+			      &sseq,
+			      &ct0, &ct0valid,
+			      &ct1, &ct1valid,
+			      ctrl_timeout,
+			      &natstate,
+			      &interval,
+			      &xtest) < 0)
 	    goto done;
     tv.tv_sec = callhome_timeout;
     for (;;){
-	cbuf *cb;
 	FD_ZERO(&fdset);
 	tv.tv_usec = 0;
 	tv.tv_sec = interval/1000;
@@ -1839,48 +2000,39 @@ main(int   argc,
 	    if (fuzz)
 		interval = 1;
 #endif
-	    if (callhome_http(callhome_url,
-			      hostname,
+	    if (callhome_http(ctrl_url,
+			      agentname,
 			      userid,
-				      NULL,
-				      info,
-				      curl_timeout,
-				      xym,
-				      &natstate) < 0)
+			      NULL,
+			      info,
+			      ctrl_timeout,
+			      xym,
+			      plugins,
+			      &natstate) < 0)
 			goto done;
 		}
 		else{
-		    if ((cb = cbuf_new()) ==NULL){
-			clicon_err(OE_PLUGIN, errno, "cbuf_new");
+		    /* Run through tests (if any), then report results back to 
+		     * controller, and at the same time query for new test 
+		     * series. 
+		     * Note that xtest must survive between calls since the 
+		     * test series are received at the end of the previous call
+		     * and used for tests at the beginning of the next call.
+		     */
+		    if (run_test_series(agentname,
+					plugins,
+					userid,
+					ctrl_url,
+					ctrl_timeout,
+					&sseq,
+					&natstate,
+					&interval,
+					&ct0,
+					&ct0valid,
+					&ct1,
+					&ct1valid,
+					&xtest) < 0)
 			goto done;
-		    }
-		    if ((retval = echo_application(xtest,
-						   cb,
-						   plugins)) < 0)
-			goto done;
-		    if (xtest){
-			xml_free(xtest);
-			xtest = NULL;
-		    }
-		    if ((xtest = xml_new("new", NULL, NULL)) == NULL)
-			goto done;
-		    if (http_data(callhome_url,
-				  hostname,
-				  userid,
-				  cb,
-				  &sseq,
-				  &ct0valid, &ct0,
-				  &ct1valid, &ct1,
-				  curl_timeout,
-				  &natstate,
-				  &interval,
-				  &xtest) < 0)
-			goto done;
-
-		    if (cb){
-			cbuf_free(cb);
-			cb = NULL;
-		    }
 		}
     } /* for */
     retval = 0;
@@ -1890,8 +2042,8 @@ main(int   argc,
     if (xtest)
 	xml_free(xtest);
 #if 0
-    if (callhome_url && name && userid){     /* Timeout Send a (call)home message */
-	if (callhome_http(callhome_url, name, userid, localport, info,
+    if (ctrl_url && name && userid){     /* Timeout Send a (call)home message */
+	if (callhome_http(ctrl_url, name, userid, localport, info,
 			  &natstate, 1) < 0)
 	    goto done;
     }
@@ -1900,6 +2052,6 @@ main(int   argc,
 	free(diskio_writefile);
     if (diskio_largefile)
 	free(diskio_largefile);
-    doexit(0);
+    doexit(agentname, plugins);
     return(retval);
 }

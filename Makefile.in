@@ -18,7 +18,6 @@
 # <http://www.gnu.org/licenses/>.
 #
 
-
 VPATH       	= @srcdir@
 prefix		= @prefix@
 srcdir  	= @srcdir@
@@ -29,19 +28,25 @@ bindir          = @bindir@
 libdir		= @libdir@
 includedir	= @includedir@
 HOST_VENDOR     = @host_vendor@
+PLUGINDIR	= $(DESTDIR)@GRIDEYE_PLUGIN_DIR@
 
-CC	= @CC@
-CFLAGS  = @CFLAGS@  @DEFS@ -D_NOMAIN -fPIC
-LDFLAGS = @LDFLAGS@
-LIBS    = @LIBS@
-INCLUDES  = -I.
-INCLUDES += -Iplugins/
-INCLUDES += -I@srcdir@
-INCLUDES += @INCLUDES@
-INCLUDES += -I$(top_srcdir)/util
+CC	        = @CC@
+CFLAGS          = @CFLAGS@ 
+CFLAGS         += @DEFS@ 
+CFLAGS         += -DPLUGINDIR=\"$(PLUGINDIR)\"
+CFLAGS         += -fPIC
 
-INSTALL = @INSTALL@
-GRIDEYE_VERSION  = @GRIDEYE_VERSION@
+LDFLAGS         = @LDFLAGS@
+LIBS            = @LIBS@
+INCLUDES        = -I.
+INCLUDES       += -Iplugins/
+INCLUDES       += -I@srcdir@
+INCLUDES       += @INCLUDES@
+INCLUDES       += -I$(top_srcdir)/util
+
+INSTALL         = @INSTALL@
+INSTALLFLAGS  	= @INSTALLFLAGS@ 
+GRIDEYE_VERSION = @GRIDEYE_VERSION@
 
 LIBSRC  = grideye_agent_lib.c
 LIBSRC += build.c
@@ -91,7 +96,7 @@ $(MYLIB) : $(LIBOBJS)
 ifeq ($(HOST_VENDOR),apple)
 	$(CC) -shared  -undefined dynamic_lookup -o $@ $(LIBOBJS) $(LIBS)
 else
-	$(CC) -shared -o $@ $(LIBOBJS) -Wl,-soname=$(MYLIB) $(LIBS)
+	$(CC) -shared -o $@ $(LIBOBJS) -Wl,-soname=$(MYLIB) $(LIBS) $(LDFLAGS)
 endif
 
 # link-name is needed for application linking
@@ -112,12 +117,12 @@ distclean:	clean
 install-bin: $(APPS)
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	for i in $(APPS); do \
-		$(INSTALL) $$i $(DESTDIR)$(bindir)/$$i; \
+		$(INSTALL) -m 0755 $(INSTALLFLAGS) $$i $(DESTDIR)$(bindir)/$$i; \
 	done
 
 install-lib: $(MYLIB)
-	install -m 755 -d $(DESTDIR)$(libdir) 
-	install -m 755 $(MYLIB) $(DESTDIR)$(libdir) 
+	install -m 0755 -d $(DESTDIR)$(libdir) 
+	install -m 0644 $(INSTALLFLAGS) $(MYLIB) $(DESTDIR)$(libdir) 
 	ln -sf $(MYLIB) $(DESTDIR)$(libdir)/$(MYLIBSO)     # -l:libgrideye_agent.so.3
 	ln -sf $(MYLIBSO) $(DESTDIR)$(libdir)/$(MYLIBLINK) # -l:libgrideye_agent.so
 
@@ -150,7 +155,7 @@ TAGS:
 	find $(srcdir) -name '*.[chyl]' | etags -
 
 depend:
-	$(CC) $(DEPENDFLAGS) @DEFS@ $(INCLUDES) $(CFLAGS) -MM $(SRC) $(LIBSRC) > .depend
+	$(CC) $(DEPENDFLAGS) @DEFS@ $(INCLUDES) $(CFLAGS) $(CPPFLAGS) -MM $(SRC) $(LIBSRC) > .depend
 	for i in $(SUBDIRS); \
 	do (cd $$i; $(MAKE) $(MFLAGS) $@); done
 

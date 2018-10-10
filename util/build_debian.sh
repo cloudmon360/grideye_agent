@@ -13,7 +13,8 @@ apt-get update && apt-get install -y \
     libfcgi-dev \
     python3-dev \
     libpython3-dev \
-    sysstat
+    sysstat \
+    iperf3
 
 # Clone repos
 mkdir grideye_build

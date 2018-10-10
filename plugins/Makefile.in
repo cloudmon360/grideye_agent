@@ -30,36 +30,41 @@ top_srcdir  	= @top_srcdir@
 bindir          = @bindir@
 HOST_CPU        = @host_cpu@
 HOST_VENDOR     = @host_vendor@
-plugindir	= $(DESTDIR)@GRIDEYE_PLUGIN_DIR@
+PLUGINDIR	= $(DESTDIR)@GRIDEYE_PLUGIN_DIR@
 
-CC	= @CC@
-CFLAGS  = -O2 -Wall -Werror -rdynamic -fPIC # Dynamic linking
-CFLAGS += -D_NOMAIN # Disable unit test main in .c files
-CFLAGS += -DPLUGINDIR=$(plugindir)
-CFLAGS += @DEFS@
+CC	        = @CC@
+CFLAGS	        = @CFLAGS@
+#CFLAGS          = -O2 -Wall -Werror -rdynamic -fPIC # Dynamic linking
+CFLAGS         += -D_NOMAIN # Disable unit test main in .c files
+CFLAGS         += @DEFS@
+CFLAGS         += -rdynamic -fPIC # Dynamic linking
 
-LDFLAGS = @LDFLAGS@
+LDFLAGS         = @LDFLAGS@
 
-INCLUDES  = -I.
-INCLUDES += -I@srcdir@
-INCLUDES += @INCLUDES@
-INCLUDES += -I$(top_srcdir)/util
+INCLUDES        = -I.
+INCLUDES       += -I@srcdir@
+INCLUDES       += @INCLUDES@
+INCLUDES       += -I$(top_srcdir)/util
 
-INSTALL = @INSTALL@
+INSTALL         = @INSTALL@
+INSTALLFLAGS    = @INSTALLFLAGS@ 
 
-PLUGINS  = grideye_dhrystones.so.1
-PLUGINS += grideye_diskio_write.so.1
-PLUGINS += grideye_diskio_write_rnd.so.1
-PLUGINS += grideye_diskio_read.so.1
-PLUGINS += grideye_mem_read.so.1
-PLUGINS += grideye_wlan.so.1
-PLUGINS += grideye_iwget.so.1
-PLUGINS += grideye_airport.so.1
-PLUGINS += grideye_sysinfo.so.1
-PLUGINS += grideye_http.so.1
+PLUGINS         = grideye_dhrystones.so.1
+PLUGINS        += grideye_diskio_write.so.1
+PLUGINS        += grideye_diskio_write_rnd.so.1
+PLUGINS        += grideye_diskio_read.so.1
+PLUGINS        += grideye_mem_read.so.1
+PLUGINS        += grideye_wlan.so.1
+PLUGINS        += grideye_iwget.so.1
+PLUGINS        += grideye_airport.so.1
+PLUGINS        += grideye_sysinfo.so.1
+PLUGINS        += grideye_http.so.1
+
+PLUGINS_PY  = grideye_iperf.py
+
 ifeq ($(HOST_CPU),x86_64)
 ifneq ($(HOST_VENDOR),apple)
-PLUGINS += grideye_cycles.so.1
+PLUGINS        += grideye_cycles.so.1
 endif
 endif
 
@@ -113,17 +118,17 @@ distclean:	clean
 
 # Special install rule for wireless tests
 install_wireless: grideye_wlan.so.1 grideye_iwget.so.1 grideye_airport.so.1
-	$(INSTALL) -d $(plugindir)
-	$(INSTALL) $^ $(plugindir)
+	$(INSTALL) -d $(PLUGINDIR)
+	$(INSTALL) -m 0644 $(INSTALLFLAGS) $^ $(PLUGINDIR)
 
 install: $(PLUGINS)
-	$(INSTALL) -d $(plugindir)
-	$(INSTALL) $^ $(plugindir)
+	$(INSTALL) -d $(PLUGINDIR)
+	$(INSTALL) -m 0644 $(INSTALLFLAGS) $^ $(PLUGINDIR)
+	$(INSTALL) -m 0644 $(PLUGINS_PY) $(PLUGINDIR)
 
 uninstall:
 	for i in $(PLUGIN); do \
-		rm -f $(plugindir)/$$i; done
-	rm -f $(plugindir)/*
+		rm -f $(PLUGINDIR)/$$i; done
 
 depend:
 	$(CC) $(DEPENDFLAGS) @DEFS@ $(INCLUDES) $(CFLAGS) -MM > .depend

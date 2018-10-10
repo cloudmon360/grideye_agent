@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2015-2016 Olof Hagsand
+# Copyright (C) 2015-2018 Olof Hagsand
 #
 # This file is part of GRIDEYE.
 #
@@ -28,7 +28,8 @@
 AC_INIT(grideye_agent.c)
 
 # Default CFLAGS unless set by environment.
-: ${CFLAGS="-O2"}
+: ${CFLAGS="-O2 -Wall"}
+: ${INSTALLFLAGS="-s"}
 
 #AC_CONFIG_HEADER(grideye_config.h)
 # clicon versions spread to Makefile's (.so files) and variable in build.c
@@ -66,10 +67,18 @@ AC_SUBST(INCLUDES)
 AC_SUBST(CPPFLAGS)
 AC_SUBST(LIBS)
 
+# This is for cligen
+AC_ARG_WITH(cligen,  [  --with-cligen=dir       Use CLIGEN here ] )
+if test "${with_cligen}"; then
+  echo "Using CLIGEN here: ${with_cligen}"
+  CPPFLAGS="-I${with_cligen}/include ${CPPFLAGS}"
+  LDFLAGS="-L${with_cligen}/lib ${LDFLAGS}"
+  test -d "$with_cligen" && CLIGEN_PREFIX="$with_cligen"
+fi
+
 # Check for cligen
 AC_CHECK_HEADERS(cligen/cligen.h,, AC_MSG_ERROR(cligen missing. Try: git clone https://github.com/olofhagsand/cligen.git))
 AC_CHECK_LIB(cligen, cligen_init,, AC_MSG_ERROR(cligen missing. Try: git clone https://github.com/olofhagsand/cligen.git))
-
 
 # Check for clixon
 AC_CHECK_HEADERS(clixon/clixon.h,, AC_MSG_ERROR(clixon missing. Try: git clone https://github.com/clicon/clixon.git), [[ #include <cligen/cligen.h> ]])
@@ -78,17 +87,32 @@ AC_SEARCH_LIBS(clicon_handle_init, clixon,, AC_MSG_ERROR(clixon missing. Try: gi
 AC_PROG_CC()
 AC_PROG_CPP
 AC_PROG_INSTALL
+AC_SUBST(INSTALL)
+AC_SUBST(INSTALLFLAGS)
 
-CPPFLAGS="-DHAVE_CONFIG_H ${CPPFLAGS}"
+CFLAGS="-DHAVE_CONFIG_H ${CPPFLAGS}"
 
 AC_MSG_RESULT(compiler is $CC)	
 
-CFLAGS="${CFLAGS} -Wall" # -Werror
+# Debug flag
+AC_ARG_ENABLE(debug, AS_HELP_STRING([--enable-debug],[Build with debug symbols, default: no]),[
+	  if test "$enableval" = no; then
+	      ac_enable_debug=no
+	  else	      
+	      ac_enable_debug=yes
+          fi
+        ],
+	[ ac_enable_debug=no])
+
+AC_MSG_RESULT(debug is $ac_enable_debug)	
+if test "$ac_enable_debug" = "yes"; then
+   CFLAGS="-g -Wall"
+   INSTALLFLAGS=""	
+fi
 
 AC_MSG_RESULT(CPPFLAGS is $CPPFLAGS)	
 AC_MSG_RESULT(CFLAGS is $CFLAGS)	
 
-LDFLAGS=""
 AC_CHECK_LIB(m, main)
 EXE_SUFFIX=""
 OBJ_SUFFIX=".o"
@@ -119,7 +143,7 @@ AC_CHECK_HEADERS(sys/sysinfo.h)
 
 AC_CHECK_FUNCS(clock_gettime)
 
-AC_SUBST(GRIDEYE_PLUGIN_DIR, $libdir/grideye) # Bind to specific CLIgen version
+AC_SUBST(GRIDEYE_PLUGIN_DIR, $libdir/grideye/agent) 
 echo "LIBDIR: $libdir"
 echo "GRIDEYE_PLUGIN_DIR: $GRIDEYE_PLUGIN_DIR"
 
