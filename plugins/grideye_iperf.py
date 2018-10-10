@@ -1,5 +1,6 @@
+import re
 import json
-import iperf3
+import subprocess
 
 GRIDEYE_PLUGIN_VERSION=2
 GRIDEYE_PLUGIN_MAGIC=0x3f687f03
@@ -25,8 +26,8 @@ def getopt(optname):
 #
 def iperf_test(instr):
 
+        args = []
         protocol = "tcp"
-
         rate = 0
         duration = 0
         host = ""
@@ -35,13 +36,13 @@ def iperf_test(instr):
         for paramstr in instr:
                 values = paramstr.decode("utf-8").split("=")
                 if values[0] == "duration":
-                        duration = int(values[1])
+                        duration = values[1]
                 if values[0] == "rate":
-                        rate = int(values[1])
+                        rate = values[1] + "K"
                 if values[0] == "host":
                         host = values[1]
                 if values[0] == "port":
-                        port = int(values[1])
+                        port = values[1]
                 if values[0] == "protocol":
                         protocol = values[1]
 
@@ -53,34 +54,40 @@ def iperf_test(instr):
                 print("iperf: Rate, duration, host and port must be set")
                 return ""
 
-        client = iperf3.Client()
-        client.duration = duration
-        client.server_hostname = host
-        client.port = port
-        client.bandwidth = rate
-        client.protocol = protocol
-        result = client.run()
+        args = ['iperf3', '-c', host, '-p', port, '-b', rate, '-t', duration, '-J']
 
-        if result.error:
-                print("iperf: Error: %s" % result.error)
+        if protocol == 'udp' or protocol == 'UDP':
+                args.append('-u')
+
+        try:
+                result = subprocess.check_output(args)
+        except subprocess.CalledProcessError as e:
+                print("iperf failed with error: " + e)
                 return ""
 
-        j = json.loads(str(result))
+        result = re.sub(r"\\n", "", str(result))
+        result = re.sub(r"\\t", "", str(result))
+        result = re.sub(r"b'", "", str(result))
+
+        j = json.loads(result.rstrip('\''))
 
         maxrtt = j['end']['streams'][0]['sender']['max_rtt']
         minrtt = j['end']['streams'][0]['sender']['min_rtt']
         meanrtt = j['end']['streams'][0]['sender']['mean_rtt']
-        lostbytes = result.sent_bytes - result.received_bytes
-        lostpercent = "%.6f" % (((result.sent_bytes - result.received_bytes) * 100) / result.sent_bytes)
+        sent_bytes = j['end']['streams'][0]['sender']['bytes']
+        received_bytes = j['end']['streams'][0]['receiver']['bytes']
+        retransmits = j['end']['streams'][0]['sender']['retransmits']
+        lostbytes = sent_bytes - received_bytes
+        lostpercent = "%.6f" % (((sent_bytes - received_bytes) * 100) / sent_bytes)
 
-        retstr = "<bytessent>" + str(result.sent_bytes) + "</bytessent>" + \
-                 "<bytesrecv>" + str(result.received_bytes) + "</bytesrecv>" + \
-                 "<byteslost>" + str(lostbytes) + "</byteslost>" + \
-                 "<retransmits>" + str(result.retransmits) + "</retransmits>" + \
-                 "<maxrtt>" + str(maxrtt) + "</maxrtt>" + \
-                 "<minrtt>" + str(minrtt) + "</minrtt>" + \
-                 "<meanrtt>" + str(meanrtt) + "</meanrtt>" + \
-                 "<lostpercent>" + str(lostpercent) + "</lostpercent>"
+        retstr = "<bytessent>%d</bytessent>" % sent_bytes
+        retstr += "<bytesrecv>%d</bytesrecv>" % received_bytes
+        retstr += "<byteslost>%d</byteslost>" % lostbytes
+        retstr += "<retransmits>%d</retransmits>" % retransmits
+        retstr += "<maxrtt>%d</maxrtt>" % maxrtt
+        retstr += "<minrtt>%d</minrtt>" % minrtt
+        retstr += "<meanrtt>%d</meanrtt>" % meanrtt
+        retstr += "<lostpercent>%s</lostpercent>" % lostpercent
 
         return retstr
 
@@ -109,4 +116,4 @@ def grideye_plugin_init(version):
 # For testing
 #
 if __name__ == '__main__':
-        iperf_test([b"host=speedtest.serverius.net", b"port=5002", b"duration=1", b"rate=1"])
+        iperf_test([b"host=jenkins.krihal.se", b"port=4619", b"duration=2", b"rate=10000"])
