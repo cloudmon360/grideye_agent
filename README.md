@@ -1,6 +1,8 @@
 # Grideye_agent
 Cloud monitoring agent. 
 
+Please contact Kristofer Hallin (kristofer.hallin@cloudmon360.com) for any questions.
+
 ## Table of contents
 
   * [Starting](#1-starting)
@@ -345,4 +347,3 @@ covered by copyright and licenses in their source code header (if any).
 ## 5. Contact
 
 Olof Hagsand and Kristofer Hallin
-
